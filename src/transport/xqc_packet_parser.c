@@ -202,6 +202,7 @@ xqc_gen_short_packet_header(xqc_packet_out_t *packet_out, unsigned char *dcid, u
 
     packet_out->po_pkt.pkt_type = XQC_PTYPE_SHORT_HEADER;
 
+    //printf("header length need = %u\n",need);//header length need = 13
     if (need > dst_buf_size) {
         return -XQC_ENOBUF;
     }
@@ -680,6 +681,7 @@ xqc_packet_encrypt_buf(xqc_connection_t *conn, xqc_packet_out_t *packet_out,
         return ret;
     }
 
+    //printf("header_len + enc_payload_len = %li+%li\n",header_len , enc_payload_len);
     *enc_pkt_len = header_len + enc_payload_len;
 
     /* do header protection */

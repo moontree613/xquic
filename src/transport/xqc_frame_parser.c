@@ -95,6 +95,136 @@ xqc_int_t xqc_parse_datagram_frame(xqc_packet_in_t *packet_in, xqc_connection_t 
     return XQC_OK;
 }
 
+/**
+ * generate datagram frame
+ */
+xqc_int_t xqc_gen_fec_frame(xqc_packet_out_t *packet_out, xqc_path_ctx_t *path)
+//uint64_t cwnd, uint64_t pacing_rate, uint64_t bw, uint64_t queue_size, uint64_t srtt
+{
+    printf("packet_out->po_used_size = %d\n",packet_out->po_used_size);
+    unsigned char *dst_buf = packet_out->po_buf + packet_out->po_used_size;//packet_out->po_used_size = 13 包头
+    size_t dst_buf_len = packet_out->po_buf_size - packet_out->po_used_size;
+    printf("dst_buf_len = %ld\n",dst_buf_len);
+    //printf("packet_out->po_used_size = %d\n",packet_out->po_used_size);
+
+    unsigned char *begin = dst_buf;
+
+    *dst_buf++ = 0x32;
+
+    size_t tmp_size = 3;//todo:变动为N
+    xqc_fec_pkt_node_t *pos = path->xqc_fec_pkt_list.head;
+    unsigned char *p[tmp_size];
+
+    int32_t pkt_num_len = xqc_put_varint_len(pos->pkt_num);
+    int32_t pkt_len_len = xqc_put_varint_len(pos->pkt_len);
+    /*int32_t cwnd_len = xqc_put_varint_len(cwnd);
+    int32_t pacing_rate_len = xqc_put_varint_len(pacing_rate);
+    int32_t bw_len = xqc_put_varint_len(bw); 
+    int32_t queue_size_len = xqc_put_varint_len(queue_size);
+    int32_t srtt_len = xqc_put_varint_len(srtt);*/
+
+    if (3*(pkt_num_len + pkt_len_len) + 1200 > dst_buf_len) {
+        return -XQC_ENOBUF;
+    }
+
+    for(size_t i=0;i<tmp_size;i++){
+        dst_buf = xqc_put_varint(dst_buf, pos->pkt_num);
+        dst_buf = xqc_put_varint(dst_buf, pos->pkt_len);
+        p[i] = pos->data;//取到内容指针
+        pos = pos->next;
+    }
+    //todo:xqc_put_varint(dst_buf, pos->pkt_num);中，dst_buf正确移动了吗？
+
+    printf("dst_buf - begin = %lu\n",dst_buf - begin);
+    // 遍历每个字节，计算 XOR 并赋值给 data
+    size_t payload_size = 1216;//todo:p[x]变动为N,这里是1216是因为p[123]就开了1216这么大,1216报段错误？1100极慢极慢
+    //size_t payload_size = 1116;
+    for (size_t i = 0; i < payload_size; ++i) {
+        *dst_buf = *p[0] ^ *p[1] ^ *p[2];
+        //printf("P[1]=%u,P[1]=%u,P[1]=%u",*p[0],*p[1],*p[2]);  
+        if(i==0){
+            printf("encode fec bit = %u\n",dst_buf[0]);
+        }
+        p[0]++;
+        p[1]++;
+        p[2]++;
+        //p[3]++;
+        dst_buf++;//这里内存访问越界了
+        //payload[i] = p1[i] ^ p2[i] ^ p3[i];  
+    }
+    printf("dst_buf - begin = %lu\n",dst_buf - begin);
+    /*dst_buf = xqc_put_varint(dst_buf, cwnd);
+    dst_buf = xqc_put_varint(dst_buf, pacing_rate);
+    dst_buf = xqc_put_varint(dst_buf, bw);
+    dst_buf = xqc_put_varint(dst_buf, queue_size);
+    dst_buf = xqc_put_varint(dst_buf, srtt);*/
+
+    packet_out->po_frame_types |= XQC_FRAME_BIT_FEC;
+    return dst_buf - begin;
+
+}
+
+
+xqc_int_t xqc_parse_fec_frame(xqc_packet_in_t *packet_in, xqc_connection_t *conn, 
+    uint64_t *pkt_num, uint64_t *pkt_size)
+//uint64_t *p_cwnd, uint64_t *p_pacing_rate, uint64_t *p_bw, uint64_t *p_queue_size, uint64_t *p_srtt
+{
+    unsigned char *p = packet_in->pos;
+    const unsigned char *end = packet_in->last;
+    const unsigned char first_byte = *p++;
+
+    int vlen;
+
+    size_t tmp_size = 3;//todo:变动为N
+    for(size_t i=0;i<tmp_size;i++){
+        vlen = xqc_vint_read(p, end, pkt_num+i);
+        if (vlen < 0) {
+        return -XQC_EVINTREAD;
+        }
+        p += vlen;
+        vlen = xqc_vint_read(p, end, pkt_size+i);
+        if (vlen < 0) {
+        return -XQC_EVINTREAD;
+        }
+        p += vlen;
+    }
+
+    /*vlen = xqc_vint_read(p, end, p_cwnd);
+    if (vlen < 0) {
+        return -XQC_EVINTREAD;
+    }
+    p += vlen;
+
+    vlen = xqc_vint_read(p, end, p_pacing_rate);
+    if (vlen < 0) {
+        return -XQC_EVINTREAD;
+    }
+    p += vlen;
+
+    vlen = xqc_vint_read(p, end, p_bw);
+    if (vlen < 0) {
+        return -XQC_EVINTREAD;
+    }
+    p += vlen;
+
+    vlen = xqc_vint_read(p, end, p_queue_size);
+    if (vlen < 0) {
+        return -XQC_EVINTREAD;
+    }
+    p += vlen;
+
+    vlen = xqc_vint_read(p, end, p_srtt);
+    if (vlen < 0) {
+        return -XQC_EVINTREAD;
+    }
+    p += vlen;*/
+
+    packet_in->pos = p;
+
+    packet_in->pi_frame_types |= XQC_FRAME_BIT_FEC;
+
+    return XQC_OK;
+}
 
 
 
@@ -228,6 +358,7 @@ new_frame:
         }
         p += offset_len;
 
+        //printf("stream_id_len=%u, offset_len=%u,length_len=%u\n",stream_id_len,offset_len,length_len);
         memcpy(p + length_len, payload, size);
         *written_size = size;
 
@@ -462,7 +593,9 @@ xqc_gen_padding_frame(xqc_connection_t *conn, xqc_packet_out_t *packet_out)
     if (packet_out->po_used_size < total_len) {
         packet_out->po_padding = packet_out->po_buf + packet_out->po_used_size;
         memset(packet_out->po_padding, 0, total_len - packet_out->po_used_size);
+        //printf("packet_out->po_used_size before pading=%i\n",packet_out->po_used_size);
         packet_out->po_used_size = total_len;
+        //printf("packet_out->po_used_size after pading=%i\n",packet_out->po_used_size);
         packet_out->po_frame_types |= XQC_FRAME_BIT_PADDING;
     }
 }
@@ -1854,10 +1987,11 @@ xqc_gen_ack_mp_frame(xqc_connection_t *conn, uint64_t dcid_seq,
            + 1  /* range_count */
            + xqc_vint_len(first_ack_range_bits);
 
+    //printf("1need %u bytes for attach ack\n",need);
     if (dst_buf + need > end) {
         return -XQC_ENOBUF;
     }
-
+    //printf("A ACK HAS BEEN ATTACH TO PKT %lu with po_enc_size=%u,po_used_size=%u\n",packet_out->po_pkt.pkt_num,packet_out->po_enc_size,packet_out->po_used_size);
     xqc_vint_write(dst_buf, frame_type, frame_type_bits, xqc_vint_len(frame_type_bits));
     dst_buf += xqc_vint_len(frame_type_bits);
 
@@ -1898,6 +2032,7 @@ xqc_gen_ack_mp_frame(xqc_connection_t *conn, uint64_t dcid_seq,
         acks_bits = xqc_vint_get_2bit(acks);
 
         need = xqc_vint_len(gap_bits) + xqc_vint_len(acks_bits);
+        //printf("2need %u bytes for attach ack\n",need);
         if (dst_buf + need > end) {
             return -XQC_ENOBUF;
         }

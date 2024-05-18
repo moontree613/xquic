@@ -334,6 +334,12 @@ xqc_send_queue_move_to_high_pri(xqc_list_head_t *pos, xqc_send_queue_t *send_que
     xqc_list_add_tail(pos, &send_queue->sndq_send_packets_high_pri);
 }
 
+void
+xqc_send_queue_move_to_loss_pkt(xqc_list_head_t *pos, xqc_send_queue_t *send_queue)
+{
+    xqc_list_del_init(pos);
+    xqc_list_add_tail(pos, &send_queue->sndq_lost_packets);
+}
 
 void
 xqc_send_queue_copy_to_lost(xqc_packet_out_t *packet_out, xqc_send_queue_t *send_queue)

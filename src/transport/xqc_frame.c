@@ -213,6 +213,7 @@ xqc_process_frames(xqc_connection_t *conn, xqc_packet_in_t *packet_in)
             break;
         case 0x02:
         case 0x03:
+            //printf("get a ack frame\n");
             ret = xqc_process_ack_frame(conn, packet_in);
             break;
         case 0x04:
@@ -235,6 +236,7 @@ xqc_process_frames(xqc_connection_t *conn, xqc_packet_in_t *packet_in)
         case 0x0d:
         case 0x0e:
         case 0x0f:
+            //printf("get a stream frame\n");
             ret = xqc_process_stream_frame(conn, packet_in);
             break;
         case 0x10:
@@ -279,6 +281,10 @@ xqc_process_frames(xqc_connection_t *conn, xqc_packet_in_t *packet_in)
         case 0x30:
         case 0x31:
             ret = xqc_process_datagram_frame(conn, packet_in);
+            break;
+        case 0x32:
+            printf("recv a fec frame\n");
+            ret = xqc_process_fec_frame(conn, packet_in);
             break;
         case 0xbaba00:
         case 0xbaba01:
@@ -426,6 +432,10 @@ xqc_process_stream_frame(xqc_connection_t *conn, xqc_packet_in_t *packet_in)
         xqc_log(conn->log, XQC_LOG_ERROR, "|xqc_parse_stream_frame error|ret:%d|stream_id:%ui|", ret, stream_id);
         goto error;
     }
+    //xqc_parse_stream_frame解析帧头以后才能知道帧类型决定是否保存这个帧
+    xqc_path_ctx_t *path;
+    path = xqc_conn_find_path_by_path_id(conn, packet_in->pi_path_id);
+    ret = xqc_check_frame_type_for_fec(path,packet_in);
 
     stream_type = xqc_get_stream_type(stream_id);
 
@@ -1367,6 +1377,200 @@ xqc_process_datagram_frame(xqc_connection_t *conn, xqc_packet_in_t *packet_in)
     return ret;
 }
 
+xqc_int_t
+xqc_process_fec_frame(xqc_connection_t *conn, xqc_packet_in_t *packet_in)
+{
+    xqc_int_t ret = XQC_ERROR;
+    printf("now xqc_process_fec_frame\n");
+    size_t fec_size = 3;//todo:变动为N
+    uint64_t pkt_num[fec_size];
+    uint64_t pkt_size[fec_size];
+    xqc_bool_t flag[fec_size];
+    memset(flag, 0, fec_size * sizeof(xqc_bool_t));//此时一个包都没认为收到过
+    ret = xqc_parse_fec_frame(packet_in, conn, pkt_num, pkt_size);//packet_in->pos will update inside
+    printf("fec pkt len = %lu\n",packet_in->last - packet_in->pos);
+    unsigned char *fec_p = packet_in->pos;//p是fec包的内容指针
+    printf("this fec protect pkt:%lu,%lu,%lu and size = %lu,%lu,%lu\n",pkt_num[0],pkt_num[1],pkt_num[2],pkt_size[0],pkt_size[1],pkt_size[2]);
+    printf("path = %lu\n",packet_in->pi_path_id);
+    /*下面做丢失包检测和重构*/
+    /*找到path*/
+    xqc_path_ctx_t *path;
+    if (conn->enable_multipath) {
+        //TODO: MPQUIC fix migration
+        path = xqc_conn_find_path_by_path_id(conn, packet_in->pi_path_id);
+
+    } else {
+        path = conn->conn_initial_path;
+    }
+    printf("flag\n");
+    //return ret;
+
+    /*进链检查保护的包收到几个*/
+    xqc_fec_pkt_node_t  *next;
+    //获取保护组的指针，以便后续使用
+    unsigned char *p[fec_size];//不会自己初始化为null，不能直接访问
+    int counter = 0;
+    xqc_fec_pkt_node_t *pos = path->xqc_fec_pkt_list_in.head;
+    for(size_t i=0;i<20;i++){
+        //printf("finding: pkt %lu is in recvd chain\n",pos->pkt_num);
+        for(size_t i=0;i<fec_size;i++){
+            if(pkt_num[i]==pos->pkt_num){
+                printf("pkt %lu is in recvd chain\n",pos->pkt_num);
+                if(i == 2){
+                    printf("pkt %lu origin:%02X %02X %02X %02X %02X\n", pos->pkt_num,pos->data[0], pos->data[1], pos->data[123], pos->data[200], pos->data[1000]);
+                    printf("origin bit = %u\n",pos->data[0]);
+                }
+                //printf("%02X %02X %02X %02X %02X\n", pos->data[0], pos->data[1], pos->data[123], pos->data[200], pos->data[1000]);
+                flag[i]=1;
+                p[i]=pos->data;
+                counter++;
+            }
+        }
+        pos = pos->next;
+    }
+    printf("counter == %u\n",counter);
+
+    /*TEST RECON*/
+    /*ENCODE*/
+    /*unsigned char test = 0;
+    printf("P[1]=%u,P[1]=%u,P[1]=%u",*p[0],*p[1],*p[2]);
+    for(size_t i=0;i<fec_size;i++){
+        test = test ^ *p[i];
+    }
+    printf("fec bit = %u\n",test);
+    printf("fec_p = %u\n",fec_p[0]);*/
+    /*DECODE*/
+    /*unsigned char recon = test;
+    for(size_t i=0;i<(fec_size-1);i++){
+        recon = recon ^ *p[i];
+    }
+    printf("recon bit = %u\n",recon);*/
+    /*FEC发过来的过程中有问题*/
+
+    /*test recon*/
+    //确定丢包号和丢包长度
+    /*size_t recon_pkt_length = pkt_size[2];//尝试重建链上的第三个包
+    unsigned char *recon_pkt_data = malloc(recon_pkt_length * sizeof(unsigned char));//记得free
+    memset(recon_pkt_data,0,recon_pkt_length * sizeof(unsigned char));
+    unsigned char *recon_p = recon_pkt_data;
+    for(size_t i=0;i<recon_pkt_length;i++){
+        recon_p[i] = fec_p[i];
+       for(size_t j=0;j<(fec_size-1);j++){
+            recon_p[i] = recon_p[i] ^ *p[j];//p[x]是指针
+            p[j]++;
+        }
+        fec_p++;
+        recon_p++;
+    }
+    printf("pkt %lu recon:%02X %02X %02X %02X %02X\n", pos->pkt_num,recon_pkt_data[0], recon_pkt_data[1], recon_pkt_data[123], recon_pkt_data[200], recon_pkt_data[1000]);
+    */
+   //free(recon_pkt_data);
+    //至此包内容重构完成，二元组（recon_pkt_data，recon_pkt_length）
+    /*test recon*/
+    //todo
+    if(counter == (fec_size-1)){//fec_size-1
+        /* 触发fec恢复 */
+        //确定丢包号和丢包长度
+        size_t recon_pkt_length = 0;
+        for(size_t i=0;i<fec_size;i++){
+            if(flag[i] == 0){//找到保护组中还没收到的包
+                recon_pkt_length = pkt_size[i];
+                //todo:确定包号
+            }
+        }
+        unsigned char *recon_pkt_data = malloc(recon_pkt_length * sizeof(unsigned char));
+        if (recon_pkt_data == NULL){//todo
+        }
+        //包内容重构
+        unsigned char *pos = recon_pkt_data;
+        for(size_t i=0;i<recon_pkt_length;i++){
+            *pos = *fec_p;
+            for(size_t i=0;i<(fec_size);i++){
+                if(p[i]!= NULL && flag[i] != 0){//0代表这个包没收到，1代表收到
+                    *pos = *pos ^ *p[i];//p[x]是指针
+                    p[i]++;
+                }
+            }
+            fec_p++;
+            pos++;
+        }
+        //至此包内容重构完成，二元组（recon_pkt_data，recon_pkt_length）
+        /*  *pos = *fec_p ^ *p[0] ^ *p[1] ^ *p[2];//p[x]是指针
+            pos++;
+            p[0]++;
+            p[1]++;
+            p[2]++;*/
+        //触发重收
+        uint64_t recv_time = packet_in->pkt_recv_time;//用fec包收到的时间替代重建包的收到时间，xqc_now();
+        ret = xqc_conn_process_packet(conn, recon_pkt_data, recon_pkt_length, packet_in->pi_path_id, recv_time);//
+        printf("reconING loss pkt %u!\n",ret);
+        //todo:把编译器的multipath打开
+        if(ret){
+            //todo:err process
+        }
+        if(ret == XQC_OK){
+            printf("recon loss pkt sucess!\n");
+        }
+        free(recon_pkt_data);
+    }
+    else if(counter == fec_size){
+        /* fec丢弃 */
+        //todo：从队列中删除该fec包
+    }
+    else{
+        /* fec入列等待 */
+        /* fec丢弃 */
+        //等待数据包到达时触发的重构
+    }
+    return ret;
+    //xqc_list_head_t *pos, *next;
+    /*xqc_fec_pkt_node_t *pos, *next;
+    xqc_list_for_each_safe(pos, next, path->xqc_fec_pkt_list_in.head) {
+        //path = xqc_list_entry(pos, xqc_path_ctx_t, path_list);
+        for(size_t i=0;i<tmp_size;i++){
+            //printf("finding: pkt %lu is in recvd chain\n",pos->pkt_num);//重要bug
+            if(pkt_num[i]==pos->pkt_num){
+                printf("pkt %lu is in recvd chain\n",pos->pkt_num);
+            }
+        }
+    }*/
+    /*uint64_t bandwith;
+    uint64_t pacing_rate;
+    uint64_t queue_size;
+    uint64_t srtt;
+    uint64_t bw;
+
+    ret = xqc_parse_fec_frame(packet_in, conn, &bandwith, &pacing_rate, &bw, &queue_size, &srtt);
+    if (ret != XQC_OK) {
+        xqc_log(conn->log, XQC_LOG_ERROR,
+                "|xqc_parse_fec_frame error|");
+        return ret;
+    }
+    if(conn->app_proto_cbs.para_cb){
+        conn->app_proto_cbs.para_cb(conn, bandwith, pacing_rate, bw, queue_size, srtt);
+    }
+
+    xqc_path_ctx_t *path;
+    xqc_list_head_t *pos, *next;
+
+    xqc_list_head_t *head;
+    int congest = 0;
+    head = &conn->conn_send_queue->sndq_send_packets_high_pri;
+    xqc_list_for_each_safe(pos, next, &conn->conn_paths_list) {
+        path = xqc_list_entry(pos, xqc_path_ctx_t, path_list);
+
+        path->path_send_ctl->tunnel_rtt = srtt;
+
+        //TODO:暂时多路径下会出现问题，后期讨论
+        if(path->path_send_ctl->ctl_cong_callback->xqc_renew_cwnd_srtt){
+            path->path_send_ctl->ctl_cong_callback->xqc_renew_cwnd_srtt(path->path_send_ctl->ctl_cong, bandwith, pacing_rate, bw, queue_size, srtt, &path->path_send_ctl->sampler);
+            break;
+        }
+    }*/
+
+    //printf("server 收到数据：%ld，%f",cwnd, (double)srtt);
+    //return XQC_OK;
+}
 
 
 xqc_int_t

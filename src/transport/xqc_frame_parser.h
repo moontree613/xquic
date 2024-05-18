@@ -25,6 +25,14 @@ xqc_int_t xqc_parse_datagram_frame(xqc_packet_in_t *packet_in, xqc_connection_t 
     unsigned char **buffer, size_t *size);
 
 /**
+ * generate fec frame
+ */
+xqc_int_t xqc_gen_fec_frame(xqc_packet_out_t *packet_out, xqc_path_ctx_t *path);
+
+xqc_int_t xqc_parse_fec_frame(xqc_packet_in_t *packet_in, xqc_connection_t *conn, 
+    uint64_t *pkt_num, uint64_t *pkt_size);
+
+/**
  * generate stream frame
  * @param written_size output size of the payload been written
  * @return size of stream frame

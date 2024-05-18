@@ -167,7 +167,6 @@ xqc_int_t
 xqc_packet_decrypt_single(xqc_connection_t *c, xqc_packet_in_t *packet_in)
 {
     xqc_int_t ret = XQC_OK;
-
     /* 
      * remember the last position of udp packet, as the last pointer
      * of packet_in will be changed during processing QUIC packets 
@@ -176,7 +175,15 @@ xqc_packet_decrypt_single(xqc_connection_t *c, xqc_packet_in_t *packet_in)
 
     /* decrypt packet */
     ret = xqc_packet_decrypt(c, packet_in);
-    if (ret == XQC_OK) {
+    if (ret == XQC_OK) {//packet_out->po_frame_types & XQC_FRAME_BIT_STREAM
+        if(packet_in->pi_pkt.pkt_type == XQC_PTYPE_SHORT_HEADER){
+            xqc_path_ctx_t *path;
+            //xqc_bool_t fec_flag = XQC_FALSE;
+            path = xqc_conn_find_path_by_path_id(c, packet_in->pi_path_id);
+            ret = xqc_record_pkt_num_for_fec(path,packet_in);
+            printf("recv_pkt_num=%ld,buf_size=%ld\n",packet_in->pi_pkt.pkt_num,packet_in->buf_size);
+            //if (fec_flag == XQC_TRUE) {printf("recv_recrd_list_full!,should receive a fec repair pkt\n");}
+        }
         /* process frames */
         xqc_log(c->log, XQC_LOG_DEBUG, "|pkt_type:%s|pkt_num:%ui|",
                 xqc_pkt_type_2_str(packet_in->pi_pkt.pkt_type), packet_in->pi_pkt.pkt_num);
@@ -216,6 +223,25 @@ xqc_packet_process_single(xqc_connection_t *c,
     if (XQC_OK != ret) {
         return ret;
     }
+
+    /*记录包信息入列，以备fec解析*/
+    //在这里记录入包，因为需要解析完包头才知道包类型和pathid，todo：但是需要解析完内容才知道包号，这里只能先保存内容，在之后xqc_packet_decrypt_single函数内再更新包号
+    /*recording pkt for fec*/
+    //这里不论是长包头（0-RTT也用长包头）还是短包头，都先记录下来，只有stream帧才会触发指针移位
+    xqc_path_ctx_t *path =  xqc_conn_find_path_by_path_id(c, packet_in->pi_path_id);
+    printf("recv a pkt , record\n");
+    //printf("%02X %02X %02X %02X %02X\n", packet_in->buf[0], packet_in->buf[1], packet_in->buf[123], packet_in->buf[200], packet_in->buf[1000]);  
+    ret = xqc_record_pkt_for_fec(path,packet_in);
+    /*if(packet_in->pi_pkt.pkt_type == XQC_PTYPE_SHORT_HEADER){
+        xqc_path_ctx_t *path;
+        //xqc_bool_t fec_flag = XQC_FALSE;
+        path = xqc_conn_find_path_by_path_id(c, packet_in->pi_path_id);
+        //if(path != NULL){printf("packet_in->decode_payload = %hhn\n",packet_in->decode_payload_len);}
+        //printf("recv_pkt_num=%ld,buf_size=%ld\n",packet_in->pi_pkt.pkt_num,packet_in->buf_size);
+        printf("recv a pkt , record\n");
+        ret = xqc_record_pkt_for_fec(path,packet_in);
+        //if (fec_flag == XQC_TRUE) {printf("recv_recrd_list_full!,should receive a fec repair pkt\n");}
+    }*/
 
     /* those packets with no packet number, don't need to be decrypt or put into CC */
     if (!xqc_packet_need_decrypt(&packet_in->pi_pkt)) {

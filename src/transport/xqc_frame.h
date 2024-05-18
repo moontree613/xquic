@@ -34,6 +34,7 @@ typedef enum {
     XQC_FRAME_PATH_STANDBY,
     XQC_FRAME_PATH_AVAILABLE,
     XQC_FRAME_DATAGRAM,
+    XQC_FRAME_FEC,
     XQC_FRAME_Extension,
     XQC_FRAME_NUM,
 } xqc_frame_type_t;
@@ -65,6 +66,7 @@ typedef enum {
     XQC_FRAME_BIT_PATH_STANDBY          = 1 << XQC_FRAME_PATH_STANDBY,
     XQC_FRAME_BIT_PATH_AVAILABLE        = 1 << XQC_FRAME_PATH_AVAILABLE,
     XQC_FRAME_BIT_DATAGRAM              = 1 << XQC_FRAME_DATAGRAM,
+    XQC_FRAME_BIT_FEC                   = 1 << XQC_FRAME_FEC,
     XQC_FRAME_BIT_Extension             = 1 << XQC_FRAME_Extension,
     XQC_FRAME_BIT_NUM                   = 1 << XQC_FRAME_NUM,
 } xqc_frame_type_bit_t;
@@ -79,7 +81,8 @@ typedef enum {
       CONNECTION_CLOSE frames, are not sent again when packet loss is
       detected, but as described in Section 10.
  */
-#define XQC_IS_ACK_ELICITING(types) ((types) & ~(XQC_FRAME_BIT_ACK | XQC_FRAME_BIT_ACK_MP| XQC_FRAME_BIT_PADDING | XQC_FRAME_BIT_CONNECTION_CLOSE))
+#define XQC_IS_ACK_ELICITING(types) ((types) & ~(XQC_FRAME_BIT_ACK | XQC_FRAME_BIT_ACK_MP| XQC_FRAME_BIT_PADDING | XQC_FRAME_BIT_CONNECTION_CLOSE | XQC_FRAME_BIT_FEC))
+//fec pkt dont need to be acked
 
 /*
  * https://tools.ietf.org/html/draft-ietf-quic-recovery-24#section-3
@@ -97,7 +100,7 @@ typedef enum {
  * PING and PADDING frames contain no information, so lost PING or
  *     PADDING frames do not require repair
  */
-#define XQC_NEED_REPAIR(types) ((types) & ~(XQC_FRAME_BIT_ACK| XQC_FRAME_BIT_PADDING | XQC_FRAME_BIT_PING | XQC_FRAME_BIT_CONNECTION_CLOSE | XQC_FRAME_BIT_DATAGRAM))
+#define XQC_NEED_REPAIR(types) ((types) & ~(XQC_FRAME_BIT_ACK| XQC_FRAME_BIT_PADDING | XQC_FRAME_BIT_PING | XQC_FRAME_BIT_CONNECTION_CLOSE | XQC_FRAME_BIT_DATAGRAM | XQC_FRAME_BIT_FEC))
 
 
 const char *xqc_frame_type_2_str(xqc_frame_type_bit_t type_bit);
@@ -162,4 +165,5 @@ xqc_int_t xqc_process_path_available_frame(xqc_connection_t *conn, xqc_packet_in
 
 xqc_int_t xqc_process_datagram_frame(xqc_connection_t *conn, xqc_packet_in_t *packet_in);
 
+xqc_int_t xqc_process_fec_frame(xqc_connection_t *conn, xqc_packet_in_t *packet_in);
 #endif /* _XQC_FRAME_H_INCLUDED_ */

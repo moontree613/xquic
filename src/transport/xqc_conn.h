@@ -249,6 +249,20 @@ typedef struct xqc_ping_record_s {
     uint32_t        ref_cnt;
 } xqc_ping_record_t;
 
+/*typedef struct xqc_fec_pkt_list {  
+    struct xqc_fec_pkt_node *head;  
+    struct xqc_fec_pkt_node *pop;  
+    struct xqc_fec_pkt_node *tail;   
+    //struct xqc_fec_pkt_node *next;    // 指向下一个节点的指针  
+    int N;  //当前链表长度，决定是否
+    //struct xqc_fec_pkt_node *next;    // 指向下一个节点的指针  
+} xqc_fec_pkt_list_t;  
+
+typedef struct xqc_fec_pkt_node {  
+    unsigned char           *data;     
+    struct xqc_fec_pkt_node *next;    // 指向下一个节点的指针
+} xqc_fec_pkt_node_t; */
+
 struct xqc_connection_s {
 
     xqc_conn_settings_t             conn_settings;
@@ -438,6 +452,10 @@ struct xqc_connection_s {
         uint8_t                     curr_index;
         uint32_t                    conn_sent_pkts;
     } snd_pkt_stats;
+    /* fec settings */
+    //size_t                            FEC_N;
+    //size_t                          fec_counter;
+    //xqc_fec_pkt_list_t                xqc_fec_pkt_list;
 };
 
 const char *xqc_conn_flag_2_str(xqc_conn_flag_t conn_flag);
@@ -456,6 +474,11 @@ void xqc_conn_destroy(xqc_connection_t *xc);
 xqc_int_t xqc_conn_client_on_alpn(xqc_connection_t *conn, const unsigned char *alpn, size_t alpn_len);
 xqc_int_t xqc_conn_server_on_alpn(xqc_connection_t *conn, const unsigned char *alpn, size_t alpn_len);
 
+//void xqc_change_fec_rato(xqc_connection_t *conn);
+xqc_bool_t xqc_check_fec_pkt(xqc_path_ctx_t *path,xqc_packet_out_t *packet_out, unsigned char *data, unsigned int len);
+int xqc_record_pkt_for_fec(xqc_path_ctx_t *path,xqc_packet_in_t *packet_in);
+int xqc_record_pkt_num_for_fec(xqc_path_ctx_t *path,xqc_packet_in_t *packet_in);
+int xqc_check_frame_type_for_fec(xqc_path_ctx_t *path,xqc_packet_in_t *packet_in);
 ssize_t xqc_path_send_one_packet(xqc_connection_t *conn, xqc_path_ctx_t *path, xqc_packet_out_t *packet_out);
 void xqc_conn_send_packets(xqc_connection_t *conn);
 void xqc_conn_send_packets_batch(xqc_connection_t *conn);
@@ -627,6 +650,7 @@ xqc_int_t xqc_conn_gp_timer_get_info(xqc_connection_t *conn, xqc_gp_timer_id_t g
 
 
 void xqc_conn_schedule_packets_to_paths(xqc_connection_t *conn);
+void xqc_conn_schedule_packets(xqc_connection_t *conn,  xqc_list_head_t *head,xqc_bool_t  packets_are_limited_by_cc, xqc_send_type_t send_type);
 
 static inline xqc_uint_t 
 xqc_conn_get_mss(xqc_connection_t *conn) {

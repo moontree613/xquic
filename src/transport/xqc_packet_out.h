@@ -131,14 +131,19 @@ xqc_packet_out_t *xqc_packet_out_create(size_t po_buf_cap);
 void xqc_packet_out_copy(xqc_packet_out_t *dst, xqc_packet_out_t *src);
 
 xqc_packet_out_t *xqc_packet_out_get(xqc_send_queue_t *send_queue);
+xqc_packet_out_t *xqc_fec_packet_out_get(xqc_send_queue_t *send_queue);
 
 xqc_packet_out_t *xqc_packet_out_get_and_insert_send(xqc_send_queue_t *send_queue, enum xqc_pkt_type pkt_type);
+
+xqc_packet_out_t *xqc_fec_packet_out_get_and_insert_send(xqc_send_queue_t *send_queue, enum xqc_pkt_type pkt_type);
 
 void xqc_packet_out_destroy(xqc_packet_out_t *packet_out);
 
 void xqc_maybe_recycle_packet_out(xqc_packet_out_t *packet_out, xqc_connection_t *conn);
 
 xqc_packet_out_t *xqc_write_new_packet(xqc_connection_t *conn, xqc_pkt_type_t pkt_type);
+
+xqc_packet_out_t *xqc_write_new_fec_packet(xqc_connection_t *conn, xqc_pkt_type_t pkt_type);
 
 xqc_packet_out_t *xqc_write_packet(xqc_connection_t *conn, xqc_pkt_type_t pkt_type, unsigned need);
 
@@ -177,6 +182,8 @@ xqc_stream_id_t stream_id, uint64_t max_stream_data, xqc_pkt_type_t xqc_pkt_type
 int xqc_write_max_streams_to_packet(xqc_connection_t *conn, uint64_t max_stream, int bidirectional);
 
 int xqc_write_new_token_to_packet(xqc_connection_t *conn);
+
+xqc_packet_out_t * xqc_write_fec_frame_to_packet(xqc_connection_t *conn, xqc_path_ctx_t *path);//fec
 
 int xqc_write_stream_frame_to_packet(xqc_connection_t *conn, xqc_stream_t *stream, xqc_pkt_type_t pkt_type,
     uint8_t fin, const unsigned char *payload, size_t payload_size, size_t *send_data_written);

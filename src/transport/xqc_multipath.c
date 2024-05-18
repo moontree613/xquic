@@ -40,6 +40,61 @@ xqc_path_schedule_buf_destroy(xqc_path_ctx_t *path)
 }
 
 void
+xqc_path_fec_pkt_list_destroy(xqc_path_ctx_t *path) {  
+    printf("fec_pkt_list_destroy\n");
+    // 析构 xqc_fec_pkt_list  
+    while (path->xqc_fec_pkt_list.head != NULL) {  
+        xqc_fec_pkt_node_t *temp = path->xqc_fec_pkt_list.head;  
+        // 更新头节点为下一个节点  
+        path->xqc_fec_pkt_list.head = temp->next;  //最后一个节点的next指向的node已经第一个被free了
+        // 如果当前节点是尾节点，则更新尾节点指针  
+        if (temp == path->xqc_fec_pkt_list.tail) {  
+            path->xqc_fec_pkt_list.head = NULL;
+            path->xqc_fec_pkt_list.pop = NULL;
+            path->xqc_fec_pkt_list.tail = path->xqc_fec_pkt_list.head;  //此时head已经是null了
+        }  
+        // 减少链表长度  
+        path->xqc_fec_pkt_list.N--;  
+        // 析构当前节点  
+        xqc_path_fec_pkt_node_destroy(temp);  
+    }  
+    printf("now free xqc_fec_pkt_list_in\n");
+    // 析构 xqc_fec_pkt_list_in（如果需要的话）  
+    while (path->xqc_fec_pkt_list_in.head != NULL) {  
+        xqc_fec_pkt_node_t *temp = path->xqc_fec_pkt_list_in.head;  
+        path->xqc_fec_pkt_list_in.head = temp->next;  
+        if (temp == path->xqc_fec_pkt_list_in.tail) {
+            path->xqc_fec_pkt_list_in.head = NULL; 
+            path->xqc_fec_pkt_list_in.pop = NULL; 
+            path->xqc_fec_pkt_list_in.tail = path->xqc_fec_pkt_list_in.head;  
+        }  
+        path->xqc_fec_pkt_list_in.N--;  
+        xqc_path_fec_pkt_node_destroy(temp);  
+    } 
+      
+    // 将链表头尾指针设为NULL，链表长度设为0（可选）  
+    path->xqc_fec_pkt_list.head = path->xqc_fec_pkt_list.tail = NULL;  
+    path->xqc_fec_pkt_list.N = 0;  
+    path->xqc_fec_pkt_list_in.head = path->xqc_fec_pkt_list_in.tail = NULL;  
+    path->xqc_fec_pkt_list_in.N = 0;  
+} 
+
+void xqc_path_fec_pkt_node_destroy(xqc_fec_pkt_node_t *node) {  
+    if (node != NULL) {  
+        // 释放 data 字段指向的内存（如果它不为 NULL）  
+        if (node->data != NULL) {  
+            //printf("double free here?\n");
+            free(node->data);  
+            node->data = NULL; // 设置为 NULL，避免悬挂指针  
+        }  
+        // 释放节点本身  
+        //printf("double free here?2\n");
+        free(node);  
+        printf("fec_pkt_node_destroy\n");
+    }  
+}
+
+void
 xqc_path_schedule_buf_pre_destroy(xqc_send_queue_t *send_queue, xqc_path_ctx_t *path)
 {
     for (xqc_send_type_t type = 0; type < XQC_SEND_TYPE_N; type++) {
@@ -65,6 +120,9 @@ xqc_path_destroy(xqc_path_ctx_t *path)
         xqc_pn_ctl_destroy(path->path_pn_ctl);
         path->path_pn_ctl = NULL;
     }
+    printf("now destroy path_fec_pkt_list\n");
+    xqc_path_fec_pkt_list_destroy(path);//2024.4.22
+    printf("now destroy path_fec_pkt_list done\n");
 
     xqc_path_schedule_buf_destroy(path);
  
@@ -173,6 +231,9 @@ xqc_path_init(xqc_path_ctx_t *path, xqc_connection_t *conn)
 {
     xqc_int_t ret = XQC_ERROR;
 
+    path->FEC_N = 3;
+    path->xqc_fec_pkt_list.N = 0;//初始化FEC链表长度
+    path->xqc_fec_pkt_list_in.N = 0;//初始化FEC链表长度
     if (conn->peer_addrlen > 0) {
         xqc_memcpy(path->peer_addr, conn->peer_addr, conn->peer_addrlen);
         path->peer_addrlen = conn->peer_addrlen;
@@ -916,6 +977,25 @@ xqc_path_send_buffer_append(xqc_path_ctx_t *path, xqc_packet_out_t *packet_out, 
 {
     /* remove from conn send queue and  add to the path schduled buffer */
     xqc_list_del_init(&packet_out->po_list);
+    xqc_list_add_tail(&packet_out->po_list, head);
+
+    packet_out->po_path_id = path->path_id;
+
+    if (!(packet_out->po_flag & XQC_POF_IN_PATH_BUF_LIST)) {
+        packet_out->po_flag |= XQC_POF_IN_PATH_BUF_LIST;
+
+        packet_out->po_cc_size = packet_out->po_used_size;
+        if (XQC_IS_ACK_ELICITING(packet_out->po_frame_types)) {
+            path->path_schedule_bytes += packet_out->po_cc_size;
+        }
+    }
+}
+
+void
+xqc_path_send_buffer_append_fec(xqc_path_ctx_t *path, xqc_packet_out_t *packet_out, xqc_list_head_t *head)
+{
+    /* remove from conn send queue and  add to the path schduled buffer */
+    //xqc_list_del_init(&packet_out->po_list);
     xqc_list_add_tail(&packet_out->po_list, head);
 
     packet_out->po_path_id = path->path_id;

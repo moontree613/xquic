@@ -97,6 +97,21 @@ typedef enum {
     XQC_PATH_CLASS_PERF_CLASS_SIZE,
 } xqc_path_perf_class_t;
 
+typedef struct xqc_fec_pkt_list {  
+    struct xqc_fec_pkt_node *head;  
+    struct xqc_fec_pkt_node *pop;  
+    struct xqc_fec_pkt_node *tail;   
+    int N;  //当前链表长度
+} xqc_fec_pkt_list_t;  
+
+typedef struct xqc_fec_pkt_node {  
+    unsigned char           *data;     
+    struct xqc_fec_pkt_node *next;    
+    xqc_packet_number_t     pkt_num; //保存的pkt_num
+    xqc_packet_number_t pkt_len;//保存包长
+} xqc_fec_pkt_node_t; 
+
+// ,转换类型保持一致便于gen fec frame函数中处理，整形拓展安全转换
 /* path context */
 struct xqc_path_ctx_s {
 
@@ -163,6 +178,13 @@ struct xqc_path_ctx_s {
     /* PTMUD */
     size_t              curr_pkt_out_size;
     size_t              path_max_pkt_out_size;
+
+    /* fec settings */
+    size_t                            FEC_N;
+    //size_t                          fec_counter;
+    xqc_fec_pkt_list_t                xqc_fec_pkt_list;
+    xqc_fec_pkt_list_t                xqc_fec_pkt_list_in;
+    //unsigned char                   *snd_pkt[10];
 };
 
 /* 埋点路径信息 */
@@ -210,6 +232,10 @@ xqc_int_t xqc_conn_init_paths_list(xqc_connection_t *conn);
 /* destroy all the paths of the connection */
 void xqc_conn_destroy_paths_list(xqc_connection_t *conn);
 
+/* destroy fec pkt list */
+void xqc_path_fec_pkt_list_destroy(xqc_path_ctx_t *path);
+void xqc_path_fec_pkt_node_destroy(xqc_fec_pkt_node_t *node);
+
 void xqc_path_schedule_buf_destroy(xqc_path_ctx_t *path);
 void xqc_path_schedule_buf_pre_destroy(xqc_send_queue_t *send_queue, xqc_path_ctx_t *path);
 
@@ -238,6 +264,7 @@ xqc_path_ctx_t *xqc_conn_find_path_by_scid(xqc_connection_t *conn, xqc_cid_t *sc
 xqc_path_ctx_t *xqc_conn_find_path_by_dcid(xqc_connection_t *conn, xqc_cid_t *dcid);
 xqc_path_ctx_t *xqc_conn_find_path_by_dcid_seq(xqc_connection_t *conn, uint64_t dcid_seq);
 
+void xqc_path_send_buffer_append_fec(xqc_path_ctx_t *path, xqc_packet_out_t *packet_out, xqc_list_head_t *head);
 void xqc_path_send_buffer_append(xqc_path_ctx_t *path, xqc_packet_out_t *packet_out, xqc_list_head_t *head);
 void xqc_path_send_buffer_remove(xqc_path_ctx_t *path, xqc_packet_out_t *packet_out);
 void xqc_path_send_buffer_clear(xqc_connection_t *conn, xqc_path_ctx_t *path, xqc_list_head_t *head, xqc_send_type_t send_type);

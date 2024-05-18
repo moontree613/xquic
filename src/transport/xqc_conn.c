@@ -775,6 +775,8 @@ xqc_conn_create(xqc_engine_t *engine, xqc_cid_t *dcid, xqc_cid_t *scid,
             xqc_scid_str(&xc->scid_set.user_scid), xqc_dcid_str(&xc->dcid_set.current_dcid), xc);
     xqc_log_event(xc->log, TRA_PARAMETERS_SET, xc, XQC_LOG_LOCAL_EVENT);
 
+    //xc->FEC_N = 3;//初始化N=3
+    //xc->xqc_fec_pkt_list.N = 0;
     return xc;
 
 fail:
@@ -1405,6 +1407,9 @@ xqc_check_acked_or_dropped_pkt(xqc_connection_t *conn,
 
     if (send_type == XQC_SEND_TYPE_RETRANS) {
         /* If not a TLP packet, mark it LOST */
+        /*if (!(packet_out->po_frame_types & XQC_FRAME_BIT_FEC)){
+            packet_out->po_flag |= XQC_POF_LOST;
+        }*/
         packet_out->po_flag |= XQC_POF_LOST;
     }
 
@@ -1456,7 +1461,6 @@ xqc_conn_schedule_packets(xqc_connection_t *conn,  xqc_list_head_t *head,
                 break;
             }
         }
-
         xqc_path_send_buffer_append(path, packet_out, &path->path_schedule_buf[send_type]);
     }
 }
@@ -1725,6 +1729,8 @@ xqc_path_send_packets(xqc_connection_t *conn, xqc_path_ctx_t *path,
     ssize_t ret = 0;
     xqc_list_head_t  *pos, *next;
     xqc_packet_out_t *packet_out;
+    xqc_packet_out_t *fec_packet;//2024.3.11
+    //path->FEC_N = 3;
 
     xqc_send_ctl_t *send_ctl = path->path_send_ctl;
     xqc_send_queue_t *send_queue = conn->conn_send_queue;
@@ -1753,6 +1759,7 @@ xqc_path_send_packets(xqc_connection_t *conn, xqc_path_ctx_t *path,
             break;
         }
 
+      
         ret = xqc_path_send_one_packet(conn, path, packet_out);
         if (ret < 0) {
             break;
@@ -1973,7 +1980,22 @@ xqc_send_packet_with_pn(xqc_connection_t *conn, xqc_path_ctx_t *path, xqc_packet
     packet_out->po_sent_time = now;
 
     /* send data */
-    ssize_t sent = xqc_send(conn, path, conn->enc_pkt, conn->enc_pkt_len);
+    /*模拟包丢失，每3个stream包丢失一个（即不发）*/
+    ssize_t sent = conn->enc_pkt_len;;
+    if(packet_out->po_frame_types & XQC_FRAME_BIT_STREAM){
+         if (packet_out->po_pkt.pkt_num % 3 == 0 && packet_out->po_pkt.pkt_num !=0 && packet_out->po_pkt.pkt_num >=6 && (packet_out->po_frame_types & XQC_FRAME_BIT_STREAM)) {
+            printf("we dont send pkt:%lu\n",packet_out->po_pkt.pkt_num);
+            ssize_t sent = conn->enc_pkt_len;//不发
+            //ssize_t sent = xqc_send(conn, path, conn->enc_pkt, conn->enc_pkt_len);//发
+        }else{
+            ssize_t sent = xqc_send(conn, path, conn->enc_pkt, conn->enc_pkt_len);
+        }
+    }
+    else{
+        ssize_t sent = xqc_send(conn, path, conn->enc_pkt, conn->enc_pkt_len);
+    }
+    /*end*/
+    //ssize_t sent = xqc_send(conn, path, conn->enc_pkt, conn->enc_pkt_len);
     if (sent != conn->enc_pkt_len) {
         xqc_log(conn->log, XQC_LOG_ERROR,
                 "|write_socket error|conn:%p|path:%ui|pkt_num:%ui|size:%ud|sent:%z|pkt_type:%s|frame:%s|now:%ui|",
@@ -1995,6 +2017,38 @@ xqc_send_packet_with_pn(xqc_connection_t *conn, xqc_path_ctx_t *path, xqc_packet
     xqc_pn_ctl_t *pn_ctl = xqc_get_pn_ctl(conn, path);
     pn_ctl->ctl_packet_number[packet_out->po_pkt.pkt_pns]++;
 
+    //printf("conn->enc_pkt_len = %li\n",conn->enc_pkt_len);//这里加了16字节,这个数值和接收端是同步的
+    /*使用fec保护数据*/
+    int ret = XQC_FALSE;
+        //if(packet_out->po_pkt.pkt_type == XQC_PTYPE_SHORT_HEADER )//只对短包头类型保存并记录其包号，不只有应用数据需要被保护send_type == XQC_SEND_TYPE_NORMAL
+        printf("send_pkt_num=%ld,po_buf_size=%d,po_used_size=%d\n",packet_out->po_pkt.pkt_num,packet_out->po_buf_size,packet_out->po_used_size);
+        //printf("%02X %02X %02X %02X %02X\n", conn->enc_pkt[0], conn->enc_pkt[1], conn->enc_pkt[123], conn->enc_pkt[200], conn->enc_pkt[1000]);
+        if(packet_out->po_frame_types & XQC_FRAME_BIT_STREAM){//只对应用数据进行保护
+            xqc_packet_out_t *fec_packet_out;
+            printf("conn->enc_pkt_len = %li\n",conn->enc_pkt_len);//这里加了16字节,这个数值和接收端是同步的
+            ret = xqc_check_fec_pkt(path,packet_out, conn->enc_pkt, conn->enc_pkt_len);//记录包(已加密)（包号、内容、包长），并检查是否需要插入一个fec包
+            //conn->enc_pkt_len，这个是最后的成包，包括attach ack和aead overhead。一定是同步的
+            if (XQC_TRUE == ret){//这里插入一个FEC包进队列
+                printf("now we gen a fec pkt to path send list");
+                fec_packet_out = xqc_write_fec_frame_to_packet(conn,path);
+                //这个函数会导致最后释放时出现段错误
+                /*if (fec_packet_out == NULL) {
+                    printf("|xqc_write_new_packet error|\n");
+                    xqc_log(conn->log, XQC_LOG_ERROR, "|xqc_write_new_packet error|");
+                    //return -XQC_EWRITE_PKT;
+                }*/
+                
+                //fec包入队发送
+                //xqc_path_send_buffer_append_fec(path, fec_packet_out, &path->path_schedule_buf[XQC_SEND_TYPE_NORMAL_HIGH_PRI]);
+                //fec_packet_out->po_path_id = path->path_id;
+
+                /* todo: err */
+                //xqc_log(conn->log, XQC_LOG_ERROR, "|sr token state mismatch|");  
+            }
+        }else{
+            printf("we dont fec protect pkt other than stream\n");
+        }
+
     xqc_conn_log_sent_packet(conn, packet_out, now);
     xqc_send_ctl_on_packet_sent(path->path_send_ctl, pn_ctl, packet_out, now);
     return sent;
@@ -2007,7 +2061,9 @@ xqc_enc_packet_with_pn(xqc_connection_t *conn, xqc_path_ctx_t *path, xqc_packet_
     xqc_short_packet_update_dcid(packet_out, path->path_dcid);
 
     /* pad packet if needed */
+    //printf("before pad:send_pkt_num=%ld,po_buf_size=%d,po_used_size=%d\n",packet_out->po_pkt.pkt_num,packet_out->po_buf_size,packet_out->po_used_size);
     if (xqc_need_padding(conn, packet_out)) {
+        printf("pad this pkt\n");
         xqc_gen_padding_frame(conn, packet_out);
     }
 
@@ -2044,7 +2100,7 @@ xqc_enc_packet_with_pn(xqc_connection_t *conn, xqc_path_ctx_t *path, xqc_packet_
 /* process and send packet which has a packet number */
 ssize_t
 xqc_process_packet_with_pn(xqc_connection_t *conn, xqc_path_ctx_t *path, xqc_packet_out_t *packet_out)
-{
+{   
     ssize_t ret = xqc_enc_packet_with_pn(conn, path, packet_out);
     if (ret != XQC_OK) {
         xqc_log(conn->log, XQC_LOG_ERROR, 
@@ -2058,7 +2114,6 @@ xqc_process_packet_with_pn(xqc_connection_t *conn, xqc_path_ctx_t *path, xqc_pac
     /* send packet in packet number space */
     return xqc_send_packet_with_pn(conn, path, packet_out);
 }
-
 
 ssize_t
 xqc_path_send_one_packet(xqc_connection_t *conn, xqc_path_ctx_t *path, xqc_packet_out_t *packet_out)
@@ -4035,6 +4090,7 @@ xqc_conn_process_packet(xqc_connection_t *c,
     const unsigned char *last_pos = NULL;
     const unsigned char *pos = packet_in_buf;                   /* start of QUIC pkt */
     const unsigned char *end = packet_in_buf + packet_in_size;  /* end of udp datagram */
+    printf("packet_in_size = %ld\n",packet_in_size);
     xqc_packet_in_t packet;
     unsigned char decrypt_payload[XQC_MAX_PACKET_IN_LEN];
 
@@ -5748,6 +5804,180 @@ xqc_conn_available_paths(xqc_engine_t *engine, const xqc_cid_t *cid)
     return available_paths;
 }
 
+//to do: check 函数的返回类型？
+//xqc_int_t
+xqc_bool_t
+xqc_check_fec_pkt(xqc_path_ctx_t *path,xqc_packet_out_t *packet_out, unsigned char *data, unsigned int len)//xqc_connection_t *conn
+{   
+    if(path->xqc_fec_pkt_list.N < path->FEC_N){   
+        size_t tmp_size = (path->FEC_N - path->xqc_fec_pkt_list.N);
+        for(size_t i=0;i<tmp_size;i++){
+            xqc_fec_pkt_node_t *node=(xqc_fec_pkt_node_t*)malloc(sizeof(xqc_fec_pkt_node_t));
+            printf("now malloc for send lplist\n");
+            //newNode?目前链上没有节点
+            if(path->xqc_fec_pkt_list.N == 0){
+                path->xqc_fec_pkt_list.head = node;
+                path->xqc_fec_pkt_list.tail = node;
+                path->xqc_fec_pkt_list.pop = node;
+            }
+            node->next = path->xqc_fec_pkt_list.head;
+            if(path->xqc_fec_pkt_list.head == path->xqc_fec_pkt_list.tail){//如果只有一个节点
+                path->xqc_fec_pkt_list.head->next = node;
+            }
+            else{
+                path->xqc_fec_pkt_list.tail->next = node;//新节点加在队尾
+            }
+            //path->xqc_fec_pkt_list->pop = node;
+            path->xqc_fec_pkt_list.tail = node;//更新尾节点位置
+            //unsigned char *data = (unsigned char*)malloc(packet_out->po_buf_size);//po_buf_size = 1200
+            unsigned char *cap = (unsigned char*)malloc(1216);//目前在xquic协议下一个UDP包最大的长度1216
+            memset(cap, 0, 1216);//fec padding  sizeof(xqc_demo_cli_client_args_t)
+            node->data = cap;//挂上内容的指针
+            path->xqc_fec_pkt_list.N++;
+        }
+        //path->xqc_fec_pkt_list.N = path->FEC_N;
+    }
+    else if(path->xqc_fec_pkt_list.N > path->FEC_N){
+        //2024.5.16
+        //比例减小，当前的链立即计算一个包，然后把链上多余的del，如果pos经过的包还不到新的比例，直接删掉链上多余的
+    }
+    //todo:减小长度
+    else{}
+    //path->xqc_fec_pkt_list.pop->data
+
+    /*记录发送的包的信息，包号和内容*/
+    //printf("packet_out->po_buf_size=%d\n",packet_out->po_buf_size);
+    //memcpy(path->xqc_fec_pkt_list.pop->data,packet_out->po_payload,packet_out->po_buf_size);
+    size_t tmp_size = path->FEC_N;
+
+    memset(path->xqc_fec_pkt_list.pop->data, 0, 1216);//先清空
+    memcpy(path->xqc_fec_pkt_list.pop->data,data,len);
+    path->xqc_fec_pkt_list.pop->pkt_num = packet_out->po_pkt.pkt_num;//记录包号
+    path->xqc_fec_pkt_list.pop->pkt_len = len;//记录包长
+    /*移动链表指针*/
+    path->xqc_fec_pkt_list.pop = path->xqc_fec_pkt_list.pop->next;
+    //if(path->xqc_fec_pkt_list.pop == path->xqc_fec_pkt_list.head){printf("pop == head");}
+    
+    if(path->xqc_fec_pkt_list.pop == path->xqc_fec_pkt_list.head){//转到头才会
+        printf("sender : 3 pkts be saved\n");
+        xqc_fec_pkt_node_t *pos = path->xqc_fec_pkt_list.pop;
+        for(size_t i=0;i<tmp_size;i++){//2024.5.16修改
+            printf("pkt_num=%li,pkt_len=%li\n",pos->pkt_num,pos->pkt_len);
+            //printf("%02X %02X %02X %02X %02X\n", pos->data[0], pos->data[1], pos->data[123], pos->data[200], pos->data[1000]);
+            pos = pos->next;
+        }
+        /*printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list.pop->pkt_num,path->xqc_fec_pkt_list.pop->pkt_len);
+        printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list.pop->next->pkt_num,path->xqc_fec_pkt_list.pop->next->pkt_len);
+        printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list.pop->next->next->pkt_num,path->xqc_fec_pkt_list.pop->next->next->pkt_len);*/
+        return XQC_TRUE;
+    }
+    else{
+        return XQC_FALSE;
+    }
+    //return XQC_OK;
+    //todo:当FEC指数变小时，如何清空队列
+
+    //return 0;
+}
+
+int
+xqc_record_pkt_for_fec(xqc_path_ctx_t *path,xqc_packet_in_t *packet_in)//xqc_connection_t *conn
+{   
+    if(path->xqc_fec_pkt_list_in.N < path->FEC_N){
+        //printf("(path->FEC_N - path->xqc_fec_pkt_list_in.N)=%li\n",(path->FEC_N - path->xqc_fec_pkt_list_in.N));
+        //size_t tmp_size = (path->FEC_N - path->xqc_fec_pkt_list_in.N);
+        size_t tmp_size = 20;//最多存储20个收到的包
+        for(size_t i=0;i<tmp_size;i++){
+            //xqc_fec_pkt_node_t *node=NULL;
+            xqc_fec_pkt_node_t *node=(xqc_fec_pkt_node_t*)malloc(sizeof(xqc_fec_pkt_node_t));
+            printf("now malloc for record\n");
+            //newNode?目前链上没有节点
+            if(path->xqc_fec_pkt_list_in.N == 0){
+                path->xqc_fec_pkt_list_in.head = node;
+                path->xqc_fec_pkt_list_in.tail = node;
+                path->xqc_fec_pkt_list_in.pop = node;
+            }
+            node->next = path->xqc_fec_pkt_list_in.head;//新节点加在队尾
+            if(path->xqc_fec_pkt_list_in.head == path->xqc_fec_pkt_list_in.tail){//如果只有一个节点
+                path->xqc_fec_pkt_list_in.head->next = node;
+            }
+            else{
+                path->xqc_fec_pkt_list_in.tail->next = node;//新节点加在队尾
+            }
+            //path->xqc_fec_pkt_list->pop = node;
+            path->xqc_fec_pkt_list_in.tail = node;//更新尾节点位置
+            //unsigned char *data = (unsigned char*)malloc(packet_in->buf_size);//po_buf_size = 1200
+            unsigned char *data = (unsigned char*)malloc(1216);//po_buf_size = 1200 1216真的够吗，可能需要1216+16
+            memset(data, 0, 1216);
+            node->data = data;//挂上内容的指针
+            node->pkt_num = -1;//初始化的pkt_num不应该被匹配
+            node->pkt_len = 0;//初始化的pkt_num不应该被匹配
+            path->xqc_fec_pkt_list_in.N++;
+        }
+        //printf("exit the for loop\n");
+        //path->xqc_fec_pkt_list.N = path->FEC_N;
+    }
+    else{}//todo:减小长度
+
+    /*记录发送的包的信息，包号和内容*/
+    /*printf("packet_in->buf_size=%ld\n",packet_in->buf_size);
+    printf("packet_in->decode_payload_len=%ld\n",packet_in->decode_payload_len);
+    printf("packet_in->decode_payload_size=%ld\n",packet_in->decode_payload_size);*/
+
+    //debug testing
+    if(packet_in->buf_size>1216){
+        memcpy(path->xqc_fec_pkt_list_in.pop->data,packet_in->buf,1216);
+    }
+    else{
+        memcpy(path->xqc_fec_pkt_list_in.pop->data,packet_in->buf,packet_in->buf_size);
+    }
+    //end
+    
+
+    //path->xqc_fec_pkt_list_in.pop->pkt_num = packet_in->pi_pkt.pkt_num;
+    path->xqc_fec_pkt_list_in.pop->pkt_len = packet_in->buf_size;
+    /*移动链表指针*/
+    //path->xqc_fec_pkt_list_in.pop = path->xqc_fec_pkt_list_in.pop->next;在记录完包号以后移动和检查队列是否满
+    
+    return XQC_FALSE;
+    /*if(path->xqc_fec_pkt_list_in.pop == path->xqc_fec_pkt_list_in.head){
+        printf("recver : 3 pkts be saved\n");
+        printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list_in.pop->pkt_num,path->xqc_fec_pkt_list_in.pop->pkt_len);
+        printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list_in.pop->next->pkt_num,path->xqc_fec_pkt_list_in.pop->next->pkt_len);
+        printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list_in.pop->next->next->pkt_num,path->xqc_fec_pkt_list_in.pop->next->next->pkt_len);
+        return XQC_TRUE;
+    }
+    else{
+        return XQC_FALSE;
+    }*/
+}
+
+int
+xqc_record_pkt_num_for_fec(xqc_path_ctx_t *path,xqc_packet_in_t *packet_in)//xqc_connection_t *conn
+{      
+
+    path->xqc_fec_pkt_list_in.pop->pkt_num = packet_in->pi_pkt.pkt_num;
+    //printf("save pkt %lu\n",path->xqc_fec_pkt_list_in.pop->pkt_num);
+    return XQC_OK;
+}
+
+int
+xqc_check_frame_type_for_fec(xqc_path_ctx_t *path,xqc_packet_in_t *packet_in)
+{    
+    printf("is it a stream frame:%u\n",packet_in->pi_frame_types & XQC_FRAME_BIT_STREAM);
+    if(packet_in->pi_frame_types & XQC_FRAME_BIT_STREAM){//只保存特定的帧类型
+        //移动链表指针
+        path->xqc_fec_pkt_list_in.pop = path->xqc_fec_pkt_list_in.pop->next;
+    
+        /*if(path->xqc_fec_pkt_list_in.pop == path->xqc_fec_pkt_list_in.head){
+            printf("recver : 20 pkts be saved\n");
+            printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list_in.pop->pkt_num,path->xqc_fec_pkt_list_in.pop->pkt_len);
+            printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list_in.pop->next->pkt_num,path->xqc_fec_pkt_list_in.pop->next->pkt_len);
+            printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list_in.pop->next->next->pkt_num,path->xqc_fec_pkt_list_in.pop->next->next->pkt_len);
+        }*/
+    }
+    return XQC_OK;
+}
 
 #ifdef XQC_COMPAT_GENERATE_SR_PKT
 
@@ -5774,3 +6004,46 @@ xqc_conn_handle_deprecated_stateless_reset(xqc_connection_t *conn,
 }
 
 #endif
+//xqc_packet_out_t *fec_packet;
+    //return packet_out;
+    /*xqc_packet_out_t *packet_out;
+    packet_out = xqc_write_new_packet(conn, pkt_type);
+    if (packet_out == NULL) {
+        return -XQC_EWRITE_PKT;
+    }
+
+    int ret;
+    ret = xqc_gen_datagram_frame(packet_out, data, data_len);
+
+    if (ret < 0) {
+        xqc_maybe_recycle_packet_out(packet_out, conn);
+        return ret;
+    }
+
+    if (use_supplied_dgram_id) {
+        packet_out->po_dgram_id = *dgram_id;
+
+    } else {
+        packet_out->po_dgram_id = conn->next_dgram_id++;
+    }
+    
+    if (dgram_id) {
+        *dgram_id = packet_out->po_dgram_id;
+    }
+
+    if (pkt_type == XQC_PTYPE_0RTT) {
+        conn->zero_rtt_count++;
+    }
+
+    if (qos_level > XQC_DATA_QOS_HIGH) {
+        if (qos_level == XQC_DATA_QOS_PROBING) {
+            packet_out->po_flag |= XQC_POF_REINJECT_DIFF_PATH;
+            packet_out->po_flag |= XQC_POF_QOS_PROBING;
+
+        } else {
+            packet_out->po_flag |= XQC_POF_NOT_REINJECT;
+        }
+
+    } else {
+        packet_out->po_flag |= XQC_POF_QOS_HIGH;
+    }*/

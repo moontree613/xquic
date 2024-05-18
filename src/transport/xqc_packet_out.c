@@ -204,10 +204,64 @@ xqc_packet_out_get(xqc_send_queue_t *send_queue)
 }
 
 xqc_packet_out_t *
+xqc_fec_packet_out_get(xqc_send_queue_t *send_queue)
+{
+    xqc_packet_out_t *packet_out;
+    unsigned int buf_size;
+    size_t buf_cap;
+    xqc_list_head_t *pos, *next;
+
+    xqc_list_for_each_safe(pos, next, &send_queue->sndq_free_packets) {
+        packet_out = xqc_list_entry(pos, xqc_packet_out_t, po_list);
+
+        xqc_send_queue_remove_free(pos, send_queue);
+
+        unsigned char *tmp = packet_out->po_buf;
+        buf_size = send_queue->sndq_conn->pkt_out_size;
+        buf_cap = packet_out->po_buf_cap;
+        memset(packet_out, 0, sizeof(xqc_packet_out_t));
+        packet_out->po_buf = tmp;
+        packet_out->po_buf_size = buf_size;
+        packet_out->po_buf_cap = buf_cap;
+        return packet_out;
+    }
+
+    //packet_out = xqc_packet_out_create(send_queue->sndq_conn->pkt_out_size);
+    //FEc包要大一些
+    //packet_out = xqc_packet_out_create(XQC_PACKET_OUT_BUF_CAP);
+    packet_out = xqc_packet_out_create(1300);
+    if (!packet_out) {
+        return NULL;
+    }
+
+    return packet_out;
+}
+
+xqc_packet_out_t *
 xqc_packet_out_get_and_insert_send(xqc_send_queue_t *send_queue, enum xqc_pkt_type pkt_type)
 {
     xqc_packet_out_t *packet_out;
     packet_out = xqc_packet_out_get(send_queue);
+    if (!packet_out) {
+        return NULL;
+    }
+
+    packet_out->po_pkt.pkt_type = pkt_type;
+    packet_out->po_pkt.pkt_pns = xqc_packet_type_to_pns(pkt_type);
+
+    /* generate packet number when send */
+    packet_out->po_pkt.pkt_num = 0;
+
+    xqc_send_queue_insert_send(packet_out, &send_queue->sndq_send_packets, send_queue);
+
+    return packet_out;
+}
+
+xqc_packet_out_t *
+xqc_fec_packet_out_get_and_insert_send(xqc_send_queue_t *send_queue, enum xqc_pkt_type pkt_type)
+{
+    xqc_packet_out_t *packet_out;
+    packet_out = xqc_fec_packet_out_get(send_queue);
     if (!packet_out) {
         return NULL;
     }
@@ -288,6 +342,39 @@ xqc_write_new_packet(xqc_connection_t *conn, xqc_pkt_type_t pkt_type)
     packet_out = xqc_packet_out_get_and_insert_send(conn->conn_send_queue, pkt_type);
     if (packet_out == NULL) {
         xqc_log(conn->log, XQC_LOG_ERROR, "|xqc_packet_out_get_and_insert_send error|");
+        return NULL;
+    }
+
+    packet_out->po_path_id = XQC_INITIAL_PATH_ID;
+
+    if (packet_out->po_used_size == 0) {
+        ret = xqc_write_packet_header(conn, packet_out);
+        if (ret) {
+            xqc_log(conn->log, XQC_LOG_ERROR, "|xqc_write_packet_header error|");
+            goto error;
+        }
+    }
+
+    return packet_out;
+
+error:
+    xqc_maybe_recycle_packet_out(packet_out, conn);
+    return NULL;
+}
+
+xqc_packet_out_t *
+xqc_write_new_fec_packet(xqc_connection_t *conn, xqc_pkt_type_t pkt_type)
+{
+    int ret;
+    xqc_packet_out_t *packet_out;
+
+    if (pkt_type == XQC_PTYPE_NUM) {
+        pkt_type = xqc_state_to_pkt_type(conn);
+    }
+
+    packet_out = xqc_fec_packet_out_get_and_insert_send(conn->conn_send_queue, pkt_type);
+    if (packet_out == NULL) {
+        xqc_log(conn->log, XQC_LOG_ERROR, "|xqc_fec_packet_out_get_and_insert_send error|");
         return NULL;
     }
 
@@ -1026,7 +1113,7 @@ xqc_write_stream_frame_to_packet(xqc_connection_t *conn,
     const unsigned char *payload, size_t payload_size, 
     size_t *send_data_written)
 {
-    xqc_packet_out_t *packet_out;
+    xqc_packet_out_t * packet_out;
     int n_written;
 
     /* increase recv window */
@@ -1082,11 +1169,13 @@ xqc_write_stream_frame_to_packet(xqc_connection_t *conn,
         return -XQC_EWRITE_PKT;
     }
 
+    printf("payload_size=%lu\n",payload_size);
     n_written = xqc_gen_stream_frame(packet_out,
                                      stream->stream_id, stream->stream_send_offset, fin,
                                      payload,
                                      payload_size,
                                      send_data_written);
+    //printf("n_written=%u\n",n_written);
     if (n_written < 0) {
         xqc_maybe_recycle_packet_out(packet_out, conn);
         return n_written;
@@ -1120,6 +1209,7 @@ xqc_write_datagram_frame_to_packet(xqc_connection_t *conn, xqc_pkt_type_t pkt_ty
     }
 
     int ret;
+    //printf("data_len=%lu\n", data_len);
     ret = xqc_gen_datagram_frame(packet_out, data, data_len);
 
     if (ret < 0) {
@@ -1249,6 +1339,67 @@ error:
     return ret;
 }
 
+xqc_packet_out_t *
+xqc_write_fec_frame_to_packet(xqc_connection_t *conn, xqc_path_ctx_t *path)
+//, uint64_t cwnd, uint64_t pacing_rate,uint64_t bw, uint64_t queue_size, uint64_t srtt
+{
+    xqc_int_t ret = XQC_ERROR;
+    xqc_packet_out_t *packet_out = NULL;
+
+    packet_out = xqc_write_new_packet(conn, XQC_PTYPE_SHORT_HEADER);
+    
+    /*产生一个fec pkt注入到conn的sendqueue中，在包头里标注好这个fecpkt属于哪个path，保护了哪些包*/
+    //packet_out = xqc_write_new_fec_packet(conn, XQC_PTYPE_SHORT_HEADER);
+    //这里产生了一个buf_size = 1200的包
+    packet_out->po_buf_size = XQC_PACKET_OUT_BUF_CAP;//扩充包大小
+    //这样操作可以吗？试试先
+
+    /*todo：新产生的fec包理应立即发送*/
+    /*if (packet_out == NULL) {
+        xqc_log(conn->log, XQC_LOG_ERROR, "|xqc_write_new_packet error|");
+        return -XQC_EWRITE_PKT;
+    }*/
+    /*这个函数很重要，正在开发，用于产生fec帧*/
+
+    ret = xqc_gen_fec_frame(packet_out, path);//,cwnd, pacing_rate, bw, queue_size, srtt
+
+    //这里的ret是fec pkt size
+    printf("fec pkt size=%i\n",ret);
+    printf("err happens outside of the func:xqc_gen_fec_frame\n");
+
+    //这句很关键
+    packet_out->po_used_size += ret;
+
+    /* send fec packet first */
+    //printf("xqc_send_queue_move_to_high_pri in\n");
+
+    //xqc_send_queue_move_to_high_pri(&packet_out->po_list, conn->conn_send_queue);//high_pri队列不是插入发送的逻辑
+    xqc_send_queue_move_to_loss_pkt(&packet_out->po_list, conn->conn_send_queue);//插入loss队列看看能不能即时发送4.25
+    xqc_list_head_t *head = &conn->conn_send_queue->sndq_lost_packets;
+    //问题：找不到可用的path
+    xqc_conn_schedule_packets(conn, head, XQC_FALSE, XQC_SEND_TYPE_RETRANS);
+    //xqc_conn_schedule_packets(conn, head, XQC_TRUE, XQC_SEND_TYPE_RETRANS);//关键是里边的xqc_path_send_buffer_append(path, packet_out, &path->path_schedule_buf[send_type]);
+    xqc_conn_retransmit_lost_packets(conn);
+    //5.16上面这几行会导致最后释放时的段错误--上面这行会导致xqc_conn_retransmit_lost_packets(conn);
+
+    //printf("xqc_send_queue_move_to_high_pri out\n");
+
+    //现在这个函数中出现了段错误
+    /*开发中，2024.4.15*/
+    /*if (ret < 0) {
+        xqc_log(conn->log, XQC_LOG_ERROR, "|xqc_gen_new_fec_frame error|");
+        goto error;
+    }*/
+    
+    return packet_out;
+    //return XQC_OK;
+
+error:
+    //xqc_maybe_recycle_packet_out(packet_out, conn);
+    xqc_maybe_recycle_packet_out(packet_out, conn);
+    return packet_out;
+    //return ret;
+}
 
 xqc_int_t
 xqc_write_retire_conn_id_frame_to_packet(xqc_connection_t *conn, uint64_t seq_num)
