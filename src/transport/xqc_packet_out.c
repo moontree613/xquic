@@ -1401,6 +1401,38 @@ error:
     //return ret;
 }
 
+int 
+xqc_write_fec_feedback_frame_to_packet(xqc_connection_t *conn, xqc_path_ctx_t *path)
+{
+    xqc_int_t ret = XQC_ERROR;
+    xqc_packet_out_t *packet_out = NULL;
+
+    packet_out = xqc_write_new_packet(conn, XQC_PTYPE_SHORT_HEADER);
+    if (packet_out == NULL) {
+        xqc_log(conn->log, XQC_LOG_ERROR, "|xqc_write_new_packet error|");
+        return -XQC_EWRITE_PKT;
+    }
+    ret = xqc_gen_fec_feedback_frame(packet_out, path);//,cwnd, pacing_rate, bw, queue_size, srtt
+
+    packet_out->po_used_size += ret;
+
+    /*feedback优先级不高，可以不用产生立即发送，送到队列中等待调度*/
+
+    //xqc_send_queue_move_to_high_pri(&packet_out->po_list, conn->conn_send_queue);//high_pri队列不是插入发送的逻辑
+
+    if (ret < 0) {
+        xqc_log(conn->log, XQC_LOG_ERROR, "|xqc_gen_new_fec_feedback_frame error|");
+        goto error;
+    }
+    
+    return ret;
+    //return XQC_OK;
+
+error:
+    xqc_maybe_recycle_packet_out(packet_out, conn);
+    return ret;
+    //return ret;
+}
 xqc_int_t
 xqc_write_retire_conn_id_frame_to_packet(xqc_connection_t *conn, uint64_t seq_num)
 {

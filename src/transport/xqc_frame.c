@@ -286,6 +286,10 @@ xqc_process_frames(xqc_connection_t *conn, xqc_packet_in_t *packet_in)
             printf("recv a fec frame\n");
             ret = xqc_process_fec_frame(conn, packet_in);
             break;
+        case 0x33:
+            printf("recv a fec feedback frame\n");
+            //ret = xqc_process_fec_feedback_frame(conn, packet_in);
+            break;
         case 0xbaba00:
         case 0xbaba01:
             if (conn->conn_settings.multipath_version == XQC_MULTIPATH_04) {
@@ -1382,12 +1386,21 @@ xqc_process_fec_frame(xqc_connection_t *conn, xqc_packet_in_t *packet_in)
 {
     xqc_int_t ret = XQC_ERROR;
     printf("now xqc_process_fec_frame\n");
-    size_t fec_size = 3;//todo:变动为N
+
+    uint64_t fec_size;
+    unsigned char *begin = packet_in->pos;
+    const unsigned char *end = packet_in->last;
+    const unsigned char first_byte = *begin++;//跳过frametype
+    int vlen = xqc_vint_read(begin, end, &fec_size);
+    if (vlen < 0) { return -XQC_EVINTREAD; }
+    begin += vlen;//这里加了一格，把begin置到pktnum开始
+    //size_t fec_size = 3;//todo:变动为N
+    printf("fec_size = %lu\n",fec_size);
     uint64_t pkt_num[fec_size];
     uint64_t pkt_size[fec_size];
     xqc_bool_t flag[fec_size];
     memset(flag, 0, fec_size * sizeof(xqc_bool_t));//此时一个包都没认为收到过
-    ret = xqc_parse_fec_frame(packet_in, conn, pkt_num, pkt_size);//packet_in->pos will update inside
+    ret = xqc_parse_fec_frame(packet_in, conn, pkt_num, pkt_size, fec_size);//packet_in->pos will update inside
     printf("fec pkt len = %lu\n",packet_in->last - packet_in->pos);
     unsigned char *fec_p = packet_in->pos;//p是fec包的内容指针
     printf("this fec protect pkt:%lu,%lu,%lu and size = %lu,%lu,%lu\n",pkt_num[0],pkt_num[1],pkt_num[2],pkt_size[0],pkt_size[1],pkt_size[2]);
@@ -1510,6 +1523,8 @@ xqc_process_fec_frame(xqc_connection_t *conn, xqc_packet_in_t *packet_in)
         }
         if(ret == XQC_OK){
             printf("recon loss pkt sucess!\n");
+            //若重建成功，返回成功信号
+            xqc_write_fec_feedback_frame_to_packet(conn,path);
         }
         free(recon_pkt_data);
     }

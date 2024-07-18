@@ -5851,7 +5851,16 @@ xqc_check_fec_pkt(xqc_path_ctx_t *path,xqc_packet_out_t *packet_out, unsigned ch
     size_t tmp_size = path->FEC_N;
 
     memset(path->xqc_fec_pkt_list.pop->data, 0, 1216);//先清空
-    memcpy(path->xqc_fec_pkt_list.pop->data,data,len);
+    //memcpy(path->xqc_fec_pkt_list.pop->data,data,len);//len可能大于1216，可能会溢出,7.18
+    printf("len = %u\n",len);
+    //debug testing,7.18
+    if(len>1216){
+        memcpy(path->xqc_fec_pkt_list.pop->data,data,1216);
+    }
+    else{
+        memcpy(path->xqc_fec_pkt_list.pop->data,data,len);
+    }
+    //end
     path->xqc_fec_pkt_list.pop->pkt_num = packet_out->po_pkt.pkt_num;//记录包号
     path->xqc_fec_pkt_list.pop->pkt_len = len;//记录包长
     /*移动链表指针*/

@@ -35,6 +35,7 @@ typedef enum {
     XQC_FRAME_PATH_AVAILABLE,
     XQC_FRAME_DATAGRAM,
     XQC_FRAME_FEC,
+    XQC_FRAME_FEC_FEEDBACK,
     XQC_FRAME_Extension,
     XQC_FRAME_NUM,
 } xqc_frame_type_t;
@@ -67,6 +68,7 @@ typedef enum {
     XQC_FRAME_BIT_PATH_AVAILABLE        = 1 << XQC_FRAME_PATH_AVAILABLE,
     XQC_FRAME_BIT_DATAGRAM              = 1 << XQC_FRAME_DATAGRAM,
     XQC_FRAME_BIT_FEC                   = 1 << XQC_FRAME_FEC,
+    XQC_FRAME_BIT_FEC_FEEDBACK          = 1 << XQC_FRAME_FEC_FEEDBACK,
     XQC_FRAME_BIT_Extension             = 1 << XQC_FRAME_Extension,
     XQC_FRAME_BIT_NUM                   = 1 << XQC_FRAME_NUM,
 } xqc_frame_type_bit_t;
