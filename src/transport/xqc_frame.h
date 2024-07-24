@@ -83,7 +83,7 @@ typedef enum {
       CONNECTION_CLOSE frames, are not sent again when packet loss is
       detected, but as described in Section 10.
  */
-#define XQC_IS_ACK_ELICITING(types) ((types) & ~(XQC_FRAME_BIT_ACK | XQC_FRAME_BIT_ACK_MP| XQC_FRAME_BIT_PADDING | XQC_FRAME_BIT_CONNECTION_CLOSE | XQC_FRAME_BIT_FEC))
+#define XQC_IS_ACK_ELICITING(types) ((types) & ~(XQC_FRAME_BIT_ACK | XQC_FRAME_BIT_ACK_MP| XQC_FRAME_BIT_PADDING | XQC_FRAME_BIT_CONNECTION_CLOSE | XQC_FRAME_BIT_FEC | XQC_FRAME_BIT_FEC_FEEDBACK))
 //fec pkt dont need to be acked
 
 /*
@@ -102,7 +102,7 @@ typedef enum {
  * PING and PADDING frames contain no information, so lost PING or
  *     PADDING frames do not require repair
  */
-#define XQC_NEED_REPAIR(types) ((types) & ~(XQC_FRAME_BIT_ACK| XQC_FRAME_BIT_PADDING | XQC_FRAME_BIT_PING | XQC_FRAME_BIT_CONNECTION_CLOSE | XQC_FRAME_BIT_DATAGRAM | XQC_FRAME_BIT_FEC))
+#define XQC_NEED_REPAIR(types) ((types) & ~(XQC_FRAME_BIT_ACK| XQC_FRAME_BIT_PADDING | XQC_FRAME_BIT_PING | XQC_FRAME_BIT_CONNECTION_CLOSE | XQC_FRAME_BIT_DATAGRAM | XQC_FRAME_BIT_FEC | XQC_FRAME_BIT_FEC_FEEDBACK))//
 
 
 const char *xqc_frame_type_2_str(xqc_frame_type_bit_t type_bit);
@@ -168,4 +168,6 @@ xqc_int_t xqc_process_path_available_frame(xqc_connection_t *conn, xqc_packet_in
 xqc_int_t xqc_process_datagram_frame(xqc_connection_t *conn, xqc_packet_in_t *packet_in);
 
 xqc_int_t xqc_process_fec_frame(xqc_connection_t *conn, xqc_packet_in_t *packet_in);
+
+xqc_int_t xqc_process_fec_feedback_frame(xqc_connection_t *conn, xqc_packet_in_t *packet_in);
 #endif /* _XQC_FRAME_H_INCLUDED_ */

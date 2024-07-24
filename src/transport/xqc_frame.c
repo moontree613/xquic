@@ -288,7 +288,7 @@ xqc_process_frames(xqc_connection_t *conn, xqc_packet_in_t *packet_in)
             break;
         case 0x33:
             printf("recv a fec feedback frame\n");
-            //ret = xqc_process_fec_feedback_frame(conn, packet_in);
+            ret = xqc_process_fec_feedback_frame(conn, packet_in);
             break;
         case 0xbaba00:
         case 0xbaba01:
@@ -1380,7 +1380,28 @@ xqc_process_datagram_frame(xqc_connection_t *conn, xqc_packet_in_t *packet_in)
 
     return ret;
 }
+xqc_int_t
+xqc_process_fec_feedback_frame(xqc_connection_t *conn, xqc_packet_in_t *packet_in)
+{
+    xqc_int_t ret = XQC_ERROR;
+    printf("now xqc_process_fec_feedback_frame\n");
 
+    unsigned char *begin = packet_in->pos;
+    const unsigned char *end = packet_in->last;
+
+    xqc_path_ctx_t *path;
+    path = xqc_conn_find_path_by_path_id(conn, packet_in->pi_path_id);
+
+    //size_t fec_size = 3;//todo:变动为N
+    //printf("former fec_size = %lu\n",1);
+    uint64_t recon_pkt_num;
+    ret = xqc_parse_fec_feedback_frame(packet_in, &recon_pkt_num);//packet_in->pos will update inside
+    
+    printf("recon_pkt_num:%lu\n",recon_pkt_num);
+    printf("path = %lu\n",packet_in->pi_path_id);
+
+    return ret;
+}
 xqc_int_t
 xqc_process_fec_frame(xqc_connection_t *conn, xqc_packet_in_t *packet_in)
 {
@@ -1485,10 +1506,13 @@ xqc_process_fec_frame(xqc_connection_t *conn, xqc_packet_in_t *packet_in)
         /* 触发fec恢复 */
         //确定丢包号和丢包长度
         size_t recon_pkt_length = 0;
+        size_t recon_pkt_num = 0;//Debug：初始化的值不应该被匹配，这里一般不会被匹配，因为0号包一般不包含应用数据
         for(size_t i=0;i<fec_size;i++){
             if(flag[i] == 0){//找到保护组中还没收到的包
                 recon_pkt_length = pkt_size[i];
                 //todo:确定包号
+                //2024.7.23添加确定修复的包号
+                recon_pkt_num = pkt_num[i];
             }
         }
         unsigned char *recon_pkt_data = malloc(recon_pkt_length * sizeof(unsigned char));
@@ -1524,7 +1548,7 @@ xqc_process_fec_frame(xqc_connection_t *conn, xqc_packet_in_t *packet_in)
         if(ret == XQC_OK){
             printf("recon loss pkt sucess!\n");
             //若重建成功，返回成功信号
-            xqc_write_fec_feedback_frame_to_packet(conn,path);
+            xqc_write_fec_feedback_frame_to_packet(conn,path,recon_pkt_num);
         }
         free(recon_pkt_data);
     }

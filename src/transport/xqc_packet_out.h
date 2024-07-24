@@ -183,7 +183,7 @@ int xqc_write_max_streams_to_packet(xqc_connection_t *conn, uint64_t max_stream,
 
 int xqc_write_new_token_to_packet(xqc_connection_t *conn);
 
-int xqc_write_fec_feedback_frame_to_packet(xqc_connection_t *conn, xqc_path_ctx_t *path);
+int xqc_write_fec_feedback_frame_to_packet(xqc_connection_t *conn, xqc_path_ctx_t *path, uint64_t recon_pkt_num);
 
 xqc_packet_out_t * xqc_write_fec_frame_to_packet(xqc_connection_t *conn, xqc_path_ctx_t *path);//fec
 
