@@ -17,6 +17,7 @@
 #include "src/transport/xqc_multipath.h"
 #include "src/transport/xqc_defs.h"
 #include "src/transport/xqc_utils.h"
+#include "src/transport/xqc_fec_ctl.h"
 #include "src/tls/xqc_tls.h"
 
 
@@ -285,6 +286,7 @@ xqc_process_frames(xqc_connection_t *conn, xqc_packet_in_t *packet_in)
         case 0x32:
             printf("recv a fec frame\n");
             ret = xqc_process_fec_frame(conn, packet_in);
+            return ret;
             break;
         case 0x33:
             printf("recv a fec feedback frame\n");
@@ -1389,17 +1391,16 @@ xqc_process_fec_feedback_frame(xqc_connection_t *conn, xqc_packet_in_t *packet_i
     unsigned char *begin = packet_in->pos;
     const unsigned char *end = packet_in->last;
 
-    xqc_path_ctx_t *path;
-    path = xqc_conn_find_path_by_path_id(conn, packet_in->pi_path_id);
+    /*xqc_path_ctx_t *path;
+    path = xqc_conn_find_path_by_path_id(conn, packet_in->pi_path_id);*/
 
-    //size_t fec_size = 3;//todo:变动为N
-    //printf("former fec_size = %lu\n",1);
-    uint64_t recon_pkt_num;
-    ret = xqc_parse_fec_feedback_frame(packet_in, &recon_pkt_num);//packet_in->pos will update inside
+    uint64_t repair_pkt_num;
+    uint64_t path_id;
+    ret = xqc_parse_fec_feedback_frame(packet_in, &repair_pkt_num, &path_id);//packet_in->pos will update inside
     
-    printf("recon_pkt_num:%lu\n",recon_pkt_num);
-    printf("path = %lu\n",packet_in->pi_path_id);
-
+    printf("repair_pkt_num:%lu\n",repair_pkt_num);
+    printf("path = %lu\n",path_id);
+    xqc_fec_ob_wnd_update_on_packet_repaired(conn,repair_pkt_num,path_id);
     return ret;
 }
 xqc_int_t
@@ -1425,7 +1426,8 @@ xqc_process_fec_frame(xqc_connection_t *conn, xqc_packet_in_t *packet_in)
     printf("fec pkt len = %lu\n",packet_in->last - packet_in->pos);
     unsigned char *fec_p = packet_in->pos;//p是fec包的内容指针
     printf("this fec protect pkt:%lu,%lu,%lu and size = %lu,%lu,%lu\n",pkt_num[0],pkt_num[1],pkt_num[2],pkt_size[0],pkt_size[1],pkt_size[2]);
-    printf("path = %lu\n",packet_in->pi_path_id);
+    /*todo:改为读取fec帧中的path，这个path代表着保护的包所归属的path*/
+    printf("path = %lu\n",packet_in->pi_path_id);//暂时默认fec包发送的path和所保护包的path相同
     /*下面做丢失包检测和重构*/
     /*找到path*/
     xqc_path_ctx_t *path;
@@ -1804,6 +1806,7 @@ xqc_process_ack_mp_frame(xqc_connection_t *conn, xqc_packet_in_t *packet_in)
                 ack_info.ranges[i].high, ack_info.ranges[i].low, packet_in->pi_pkt.pkt_pns);
         xqc_log_event(conn->log, TRA_PACKETS_ACKED, packet_in, ack_info.ranges[i].high, ack_info.ranges[i].low);
     }
+    /* update fec ob window */
 
     xqc_pn_ctl_t *pn_ctl = xqc_get_pn_ctl(conn, path_to_be_acked);
 

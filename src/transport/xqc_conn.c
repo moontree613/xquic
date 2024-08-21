@@ -775,8 +775,6 @@ xqc_conn_create(xqc_engine_t *engine, xqc_cid_t *dcid, xqc_cid_t *scid,
             xqc_scid_str(&xc->scid_set.user_scid), xqc_dcid_str(&xc->dcid_set.current_dcid), xc);
     xqc_log_event(xc->log, TRA_PARAMETERS_SET, xc, XQC_LOG_LOCAL_EVENT);
 
-    //xc->FEC_N = 3;//初始化N=3
-    //xc->xqc_fec_pkt_list.N = 0;
     return xc;
 
 fail:
@@ -1983,7 +1981,7 @@ xqc_send_packet_with_pn(xqc_connection_t *conn, xqc_path_ctx_t *path, xqc_packet
     /*模拟包丢失，每3个stream包丢失一个（即不发）*/
     ssize_t sent = conn->enc_pkt_len;;
     if(packet_out->po_frame_types & XQC_FRAME_BIT_STREAM){
-         if (packet_out->po_pkt.pkt_num % 3 == 0 && packet_out->po_pkt.pkt_num !=0 && packet_out->po_pkt.pkt_num >=6 && (packet_out->po_frame_types & XQC_FRAME_BIT_STREAM)) {
+         if (packet_out->po_pkt.pkt_num % 5 == 0 && packet_out->po_pkt.pkt_num !=0 && packet_out->po_pkt.pkt_num >=6 && (packet_out->po_frame_types & XQC_FRAME_BIT_STREAM)) {//2024.8.14
             printf("we dont send pkt:%lu\n",packet_out->po_pkt.pkt_num);
             ssize_t sent = conn->enc_pkt_len;//不发
             //ssize_t sent = xqc_send(conn, path, conn->enc_pkt, conn->enc_pkt_len);//发
@@ -2243,6 +2241,20 @@ xqc_conn_retransmit_lost_packets(xqc_connection_t *conn)
     }
 }
 
+void
+xqc_conn_transmit_fec_packets(xqc_connection_t *conn)
+{
+    xqc_list_head_t *head = &conn->conn_send_queue->sndq_fec_packets;
+    int congest = 1;//fec不受cc限制，提前空余空间，之后讨论解决方案
+
+    xqc_path_ctx_t  *path;
+    xqc_list_head_t *pos, *next;
+
+    xqc_list_for_each_safe(pos, next, &conn->conn_paths_list) {
+        path = xqc_list_entry(pos, xqc_path_ctx_t, path_list);
+        xqc_path_send_packets(conn, path, head, congest, XQC_SEND_TYPE_FEC);
+    }
+}
 
 void
 xqc_conn_transmit_pto_probe_packets_batch(xqc_connection_t *conn)
@@ -5866,8 +5878,25 @@ xqc_check_fec_pkt(xqc_path_ctx_t *path,xqc_packet_out_t *packet_out, unsigned ch
     /*移动链表指针*/
     path->xqc_fec_pkt_list.pop = path->xqc_fec_pkt_list.pop->next;
     //if(path->xqc_fec_pkt_list.pop == path->xqc_fec_pkt_list.head){printf("pop == head");}
-    
-    if(path->xqc_fec_pkt_list.pop == path->xqc_fec_pkt_list.head){//转到头才会
+    /*fec cnt增加1*/
+    path->fec_send_pkt_cnt++;
+
+    if(path->fec_send_pkt_cnt >= path->FEC_N){//已发送包计数器超过比例就产生一个保护包
+        printf("sender : %lu pkts be saved\n",path->fec_send_pkt_cnt);
+        xqc_fec_pkt_node_t *pos = path->xqc_fec_pkt_list.head;//2024.8.15修改
+        for(size_t i=0;i<path->fec_send_pkt_cnt;i++){//2024.5.16修改
+            printf("pkt_num=%li,pkt_len=%li\n",pos->pkt_num,pos->pkt_len);
+            pos = pos->next;
+        }
+        //path->fec_send_pkt_cnt = 0 ;//在产生完包后清0cnt，并将pos指针回到头，因此不在check函数中
+        return XQC_TRUE;
+    }
+    else{
+        return XQC_FALSE;
+    }
+
+    /*旧版*/
+    /*if(path->xqc_fec_pkt_list.pop == path->xqc_fec_pkt_list.head){//转到头才会,2024.8.14更新：改为使用计数器counter，便于添加比例的动态调整
         printf("sender : 3 pkts be saved\n");
         xqc_fec_pkt_node_t *pos = path->xqc_fec_pkt_list.pop;
         for(size_t i=0;i<tmp_size;i++){//2024.5.16修改
@@ -5875,14 +5904,15 @@ xqc_check_fec_pkt(xqc_path_ctx_t *path,xqc_packet_out_t *packet_out, unsigned ch
             //printf("%02X %02X %02X %02X %02X\n", pos->data[0], pos->data[1], pos->data[123], pos->data[200], pos->data[1000]);
             pos = pos->next;
         }
-        /*printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list.pop->pkt_num,path->xqc_fec_pkt_list.pop->pkt_len);
+        printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list.pop->pkt_num,path->xqc_fec_pkt_list.pop->pkt_len);
         printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list.pop->next->pkt_num,path->xqc_fec_pkt_list.pop->next->pkt_len);
-        printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list.pop->next->next->pkt_num,path->xqc_fec_pkt_list.pop->next->next->pkt_len);*/
+        printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list.pop->next->next->pkt_num,path->xqc_fec_pkt_list.pop->next->next->pkt_len);
         return XQC_TRUE;
     }
     else{
         return XQC_FALSE;
-    }
+    }*/
+
     //return XQC_OK;
     //todo:当FEC指数变小时，如何清空队列
 

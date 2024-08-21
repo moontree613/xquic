@@ -910,7 +910,7 @@ xqc_engine_main_logic(xqc_engine_t *engine)
         } else {
             conn->last_ticked_time = now;
 
-            xqc_conn_schedule_packets_to_paths(conn);
+             xqc_conn_schedule_packets_to_paths(conn);
 
             if (xqc_engine_is_sendmmsg_on(engine)) {
                 xqc_conn_transmit_pto_probe_packets_batch(conn);

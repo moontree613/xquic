@@ -56,6 +56,7 @@ typedef enum {
     XQC_SEND_TYPE_NORMAL_HIGH_PRI,
     XQC_SEND_TYPE_RETRANS,
     XQC_SEND_TYPE_PTO_PROBE,
+    XQC_SEND_TYPE_FEC,
     XQC_SEND_TYPE_N,
 } xqc_send_type_t;
 
@@ -96,6 +97,14 @@ typedef enum {
     XQC_PATH_CLASS_STANDBY_LOW,
     XQC_PATH_CLASS_PERF_CLASS_SIZE,
 } xqc_path_perf_class_t;
+
+/* pkt status in fec observation window */
+typedef enum {
+    XQC_FEC_PKT_STATUS_UNACKED   = 0,    /* initial / unack / inflight */
+    XQC_FEC_PKT_STATUS_ACKED     = 1,    /* acked */
+    XQC_FEC_PKT_STATUS_LOST      = 2,    /* lost */
+    XQC_FEC_PKT_STATUS_REPAIR    = 3,    /* pkt be repaired by fec */
+} xqc_fec_pkt_status_t;
 
 typedef struct xqc_fec_pkt_list {  
     struct xqc_fec_pkt_node *head;  
@@ -182,11 +191,19 @@ struct xqc_path_ctx_s {
     /* fec settings */
     size_t                            FEC_N;
     //size_t                          fec_counter;
+    //int                               FEC_WINDOW_SIZE;
+    //int                               *fec_wnd;
+    
+    //size_t                            FEC_OB_WND_SIZE;
+    //xqc_fec_pkt_status_t              *fec_ob_wnd;//[5]
+    xqc_fec_pkt_status_t              fec_ob_wnd[20];//FEC_OB_WND_SIZE
+    size_t                            fec_ob_wnd_upper_bound;
     xqc_fec_pkt_list_t                xqc_fec_pkt_list;
     xqc_fec_pkt_list_t                xqc_fec_pkt_list_in;
+    size_t                            fec_send_pkt_cnt;//用于计算当前累计发送的包个数，大于FEC_N就添加一个保护包
     //unsigned char                   *snd_pkt[10];
 };
-
+#define FEC_OB_WND_SIZE 10
 /* 埋点路径信息 */
 /* 区别于xquic.h的xqc_path_metrics_t，填在conn_stat的conn_info字段里 */
 typedef struct {

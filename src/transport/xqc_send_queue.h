@@ -21,6 +21,7 @@ typedef struct xqc_send_queue_s {
     xqc_list_head_t             sndq_free_packets;                  /* xqc_packet_out_t */
     xqc_list_head_t             sndq_buff_1rtt_packets;             /* xqc_packet_out_t buff 1RTT before handshake complete */
     xqc_list_head_t             sndq_pto_probe_packets;             /* xqc_packet_out_t */
+    xqc_list_head_t             sndq_fec_packets;                  /* fec xqc_packet_out_t */
 
     uint64_t                    sndq_packets_in_unacked_list;       /* to estimate bytes in the lists except for unacked list */
     uint64_t                    sndq_packets_used;
@@ -69,6 +70,9 @@ void xqc_send_queue_remove_send(xqc_list_head_t *pos);
 void xqc_send_queue_insert_lost(xqc_list_head_t *pos, xqc_list_head_t *head);
 void xqc_send_queue_remove_lost(xqc_list_head_t *pos);
 
+//void xqc_send_queue_insert_lost(xqc_list_head_t *pos, xqc_list_head_t *head);
+void xqc_send_queue_remove_fec(xqc_list_head_t *pos);
+
 void xqc_send_queue_insert_free(xqc_packet_out_t *po, xqc_list_head_t *head, xqc_send_queue_t *send_queue);
 void xqc_send_queue_remove_free(xqc_list_head_t *pos, xqc_send_queue_t *send_queue);
 
@@ -86,6 +90,7 @@ void xqc_send_queue_move_to_head(xqc_list_head_t *pos, xqc_list_head_t *head);
 void xqc_send_queue_move_to_tail(xqc_list_head_t *pos, xqc_list_head_t *head);
 void xqc_send_queue_move_to_high_pri(xqc_list_head_t *pos, xqc_send_queue_t *send_queue);
 void xqc_send_queue_move_to_loss_pkt(xqc_list_head_t *pos, xqc_send_queue_t *send_queue);
+void xqc_send_queue_move_to_fec_pkt(xqc_list_head_t *pos, xqc_send_queue_t *send_queue);
 
 void xqc_send_queue_copy_to_lost(xqc_packet_out_t *packet_out, xqc_send_queue_t *send_queue);
 void xqc_send_queue_copy_to_probe(xqc_packet_out_t *packet_out, xqc_send_queue_t *send_queue, xqc_path_ctx_t *path);

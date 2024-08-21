@@ -204,6 +204,7 @@ set(
     "src/transport/xqc_quic_lb.c"
     "src/transport/xqc_timer.c"
     "src/transport/xqc_reinjection.c"
+    "src/transport/xqc_fec_ctl.c"
     "src/transport/reinjection_control/xqc_reinj_default.c"
     "src/transport/reinjection_control/xqc_reinj_deadline.c"
     "src/transport/reinjection_control/xqc_reinj_dgram.c"

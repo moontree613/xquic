@@ -37,7 +37,7 @@ xqc_int_t xqc_parse_fec_frame(xqc_packet_in_t *packet_in, xqc_connection_t *conn
  */
 xqc_int_t xqc_gen_fec_feedback_frame(xqc_packet_out_t *packet_out, xqc_path_ctx_t *path, uint64_t recon_pkt_num);
 
-xqc_int_t xqc_parse_fec_feedback_frame(xqc_packet_in_t *packet_in ,uint64_t *recon_pkt_num);
+xqc_int_t xqc_parse_fec_feedback_frame(xqc_packet_in_t *packet_in ,uint64_t *recon_pkt_num,uint64_t *path_id);
     
 /**
  * generate stream frame

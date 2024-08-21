@@ -113,12 +113,15 @@ xqc_int_t xqc_gen_fec_frame(xqc_packet_out_t *packet_out, xqc_path_ctx_t *path)
     //*dst_buf++ = (uint8_t)path->FEC_N;
 
     //size_t tmp_size = 3;//todo:变动为N
-    size_t tmp_size = path->FEC_N;
+    //size_t tmp_size = path->FEC_N;//2024.8.14修改，使用当前的fec_send_pkt_cnt来计算保护组个数，便于快速变动
+    size_t tmp_size = path->fec_send_pkt_cnt;
+    path->fec_send_pkt_cnt = 0 ;//将fec_send_pkt_cnt清零，意味着新的保护组开始
+    path->xqc_fec_pkt_list.pop = path->xqc_fec_pkt_list.head;//pos指针回到链表头，意味着新的保护组开始
+    
     xqc_fec_pkt_node_t *pos = path->xqc_fec_pkt_list.head;
     unsigned char *p[tmp_size];
 
-    
-    int32_t FEC_NUM_len = xqc_put_varint_len(path->FEC_N);
+    int32_t FEC_NUM_len = xqc_put_varint_len(tmp_size);//path->FEC_N,8.14
     int32_t pkt_num_len = xqc_put_varint_len(pos->pkt_num);
     int32_t pkt_len_len = xqc_put_varint_len(pos->pkt_len);
     /*int32_t cwnd_len = xqc_put_varint_len(cwnd);
@@ -132,7 +135,8 @@ xqc_int_t xqc_gen_fec_frame(xqc_packet_out_t *packet_out, xqc_path_ctx_t *path)
     }
 
     printf("path->FEC_N:%lu\n",path->FEC_N);
-    dst_buf = xqc_put_varint(dst_buf, path->FEC_N);
+    printf("fecpacket->FEC_N:%lu\n",tmp_size);
+    dst_buf = xqc_put_varint(dst_buf,tmp_size);//path->FEC_N
     for(size_t i=0;i<tmp_size;i++){
         dst_buf = xqc_put_varint(dst_buf, pos->pkt_num);
         dst_buf = xqc_put_varint(dst_buf, pos->pkt_len);
@@ -177,6 +181,7 @@ xqc_int_t xqc_gen_fec_frame(xqc_packet_out_t *packet_out, xqc_path_ctx_t *path)
     dst_buf = xqc_put_varint(dst_buf, srtt);*/
 
     packet_out->po_frame_types |= XQC_FRAME_BIT_FEC;
+    
     return dst_buf - begin;
 
 }
@@ -189,9 +194,14 @@ xqc_int_t xqc_parse_fec_frame(xqc_packet_in_t *packet_in, xqc_connection_t *conn
     unsigned char *p = packet_in->pos;//从frametype开始
     const unsigned char *end = packet_in->last;
     const unsigned char first_byte = *p++;//p++一次到frametype，两次才跳过FEC_NUM
-    p++;
-    
+    //p++;
     int vlen;
+
+    uint64_t fec_size;
+    vlen = xqc_vint_read(p, end, &fec_size);
+    if (vlen < 0) { return -XQC_EVINTREAD; }
+    p += vlen;//跳过FEC_NUM
+    
 
     size_t tmp_size = FEC_NUM;//todo:变动为N
     for(size_t i=0;i<tmp_size;i++){
@@ -237,7 +247,7 @@ xqc_int_t xqc_parse_fec_frame(xqc_packet_in_t *packet_in, xqc_connection_t *conn
     }
     p += vlen;*/
 
-    packet_in->pos = p;
+    packet_in->pos = (unsigned char *)p;
 
     packet_in->pi_frame_types |= XQC_FRAME_BIT_FEC;
 
@@ -257,15 +267,17 @@ xqc_int_t xqc_gen_fec_feedback_frame(xqc_packet_out_t *packet_out, xqc_path_ctx_
         return -XQC_ENOBUF;
     }
     printf("recon_pkt_num:%lu\n",recon_pkt_num);
-    
+    printf("recon_pkt_path:%lu\n",path->path_id);
+
     dst_buf = xqc_put_varint(dst_buf, recon_pkt_num);
+    dst_buf = xqc_put_varint(dst_buf, path->path_id);
 
     printf("dst_buf - begin = %lu\n",dst_buf - begin);
 
     packet_out->po_frame_types |= XQC_FRAME_BIT_FEC_FEEDBACK;
     return dst_buf - begin;
 }
-xqc_int_t xqc_parse_fec_feedback_frame(xqc_packet_in_t *packet_in ,uint64_t *recon_pkt_num){
+xqc_int_t xqc_parse_fec_feedback_frame(xqc_packet_in_t *packet_in ,uint64_t *recon_pkt_num, uint64_t *path_id){
     unsigned char *p = packet_in->pos;//从frametype开始
     const unsigned char *end = packet_in->last;
     p++;//p++一次跳过frametype
@@ -276,7 +288,13 @@ xqc_int_t xqc_parse_fec_feedback_frame(xqc_packet_in_t *packet_in ,uint64_t *rec
         return -XQC_EVINTREAD;
     }
     p += vlen;
-    
+
+    vlen = xqc_vint_read(p, end, path_id);
+    if (vlen < 0) {
+        return -XQC_EVINTREAD;
+    }
+    p += vlen;
+
     packet_in->pos = p;
 
     packet_in->pi_frame_types |= XQC_FRAME_BIT_FEC_FEEDBACK;

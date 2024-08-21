@@ -494,6 +494,7 @@ void xqc_conn_transmit_pto_probe_packets(xqc_connection_t *conn);
 void xqc_conn_transmit_pto_probe_packets_batch(xqc_connection_t *conn);
 void xqc_conn_retransmit_lost_packets(xqc_connection_t *conn);
 void xqc_conn_retransmit_lost_packets_batch(xqc_connection_t *conn);
+void xqc_conn_transmit_fec_packets(xqc_connection_t *conn);
 xqc_int_t xqc_path_send_ping_to_probe(xqc_path_ctx_t *path, xqc_pkt_num_space_t pns, xqc_path_specified_flag_t flag);
 void xqc_path_send_one_or_two_ack_elicit_pkts(xqc_path_ctx_t *path, xqc_pkt_num_space_t pns);
 void xqc_conn_send_one_ack_eliciting_pkt(xqc_connection_t *conn, xqc_pkt_num_space_t pns);

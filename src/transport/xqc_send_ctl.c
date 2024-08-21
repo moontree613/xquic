@@ -20,6 +20,7 @@
 #include "src/transport/xqc_utils.h"
 #include "src/transport/xqc_datagram.h"
 #include "src/transport/xqc_reinjection.h"
+#include "src/transport/xqc_fec_ctl.h"
 
 int 
 xqc_send_ctl_may_remove_unacked_dgram(xqc_connection_t *conn, xqc_packet_out_t *po)
@@ -893,6 +894,8 @@ xqc_send_ctl_on_ack_received(xqc_send_ctl_t *send_ctl, xqc_pn_ctl_t *pn_ctl, xqc
             if (packet_out->po_frame_types & XQC_FRAME_BIT_DATAGRAM) {
                 xqc_datagram_notify_ack(conn, packet_out);
             }
+            //xqc_fec_ob_wnd_update_on_packet_acked(packet_out)2024.8.13
+            //xqc_fec_ob_wnd_update_on_packet_acked(conn,packet_out); 8.14debug
 
             xqc_send_ctl_on_packet_acked(send_ctl, packet_out, ack_recv_time, 1);
 
@@ -1285,7 +1288,9 @@ xqc_send_ctl_detect_lost(xqc_send_ctl_t *send_ctl, xqc_send_queue_t *send_queue,
                 }
 
                 lost_n++;
-
+                /*update fec ob window when pkt lost*/
+                xqc_fec_ob_wnd_update_on_packet_lost(conn, po);
+                
                 xqc_log(conn->log, XQC_LOG_DEBUG, "|mark lost|pns:%d|pkt_num:%ui|"
                         "lost_pn:%ui|po_sent_time:%ui|lost_send_time:%ui|loss_delay:%ui|frame:%s|repair:%d|",
                         pns, po->po_pkt.pkt_num, lost_pn, po->po_sent_time, lost_send_time, loss_delay,

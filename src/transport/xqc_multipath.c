@@ -231,9 +231,16 @@ xqc_path_init(xqc_path_ctx_t *path, xqc_connection_t *conn)
 {
     xqc_int_t ret = XQC_ERROR;
 
-    path->FEC_N = 3;
+    path->FEC_N = 4;
     path->xqc_fec_pkt_list.N = 0;//初始化FEC链表长度
     path->xqc_fec_pkt_list_in.N = 0;//初始化FEC链表长度
+    path->fec_send_pkt_cnt = 0;//初始化保护计数器
+    //path->FEC_OB_WND_SIZE = 5;
+    //xqc_fec_pkt_status_t              fec_ob_wnd_tmp[path->FEC_OB_WND_SIZE];//是局部变量，想要保存数组必须声明为全局变量
+    memset(path->fec_ob_wnd, XQC_FEC_PKT_STATUS_UNACKED, sizeof(path->fec_ob_wnd)); //debug 2024.7.25
+    //memset(fec_ob_wnd_tmp, XQC_FEC_PKT_STATUS_UNACKED, sizeof(fec_ob_wnd_tmp)); //debug 2024.8.13
+    //path->fec_ob_wnd = fec_ob_wnd_tmp;//挂上指针
+    path->fec_ob_wnd_upper_bound = FEC_OB_WND_SIZE - 1;//path->FEC_OB_WND_SIZE
     if (conn->peer_addrlen > 0) {
         xqc_memcpy(path->peer_addr, conn->peer_addr, conn->peer_addrlen);
         path->peer_addrlen = conn->peer_addrlen;
