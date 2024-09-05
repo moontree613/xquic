@@ -1427,12 +1427,16 @@ xqc_write_fec_feedback_frame_to_packet(xqc_connection_t *conn, xqc_path_ctx_t *p
     packet_out->po_used_size += ret;
 
     /*2024.8.13更新*/
-    xqc_send_queue_move_to_loss_pkt(&packet_out->po_list, conn->conn_send_queue);//插入loss队列即时发送
-    xqc_list_head_t *head = &conn->conn_send_queue->sndq_lost_packets;
+    //xqc_send_queue_move_to_loss_pkt(&packet_out->po_list, conn->conn_send_queue);//插入loss队列即时发送//2024.8.27注释
+    //xqc_list_head_t *head = &conn->conn_send_queue->sndq_lost_packets;//2024.8.27注释
+    xqc_send_queue_move_to_fec_pkt(&packet_out->po_list, conn->conn_send_queue);//插入loss队列看看能不能即时发送4.25
+    xqc_list_head_t *head = &conn->conn_send_queue->sndq_fec_packets;
     //问题：找不到可用的path
-    xqc_conn_schedule_packets(conn, head, XQC_FALSE, XQC_SEND_TYPE_RETRANS);
+    //xqc_conn_schedule_packets(conn, head, XQC_FALSE, XQC_SEND_TYPE_RETRANS);//2024.8.27注释
+    xqc_conn_schedule_packets(conn, head, XQC_FALSE, XQC_SEND_TYPE_FEC);
     //xqc_conn_schedule_packets(conn, head, XQC_TRUE, XQC_SEND_TYPE_RETRANS);//关键是里边的xqc_path_send_buffer_append(path, packet_out, &path->path_schedule_buf[send_type]);
-    xqc_conn_retransmit_lost_packets(conn);
+    //xqc_conn_retransmit_lost_packets(conn);//2024.8.27注释
+    xqc_conn_transmit_fec_packets(conn);
     /*2024.8.13更新*/
 
     return XQC_OK;

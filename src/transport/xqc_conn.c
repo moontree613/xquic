@@ -1981,10 +1981,10 @@ xqc_send_packet_with_pn(xqc_connection_t *conn, xqc_path_ctx_t *path, xqc_packet
     /*模拟包丢失，每3个stream包丢失一个（即不发）*/
     ssize_t sent = conn->enc_pkt_len;;
     if(packet_out->po_frame_types & XQC_FRAME_BIT_STREAM){
-         if (packet_out->po_pkt.pkt_num % 5 == 0 && packet_out->po_pkt.pkt_num !=0 && packet_out->po_pkt.pkt_num >=6 && (packet_out->po_frame_types & XQC_FRAME_BIT_STREAM)) {//2024.8.14
+         if (packet_out->po_pkt.pkt_num % 3 == 0 && packet_out->po_pkt.pkt_num !=0 && packet_out->po_pkt.pkt_num >=6 ) {//2024.8.14 // && (packet_out->po_frame_types & XQC_FRAME_BIT_STREAM)
             printf("we dont send pkt:%lu\n",packet_out->po_pkt.pkt_num);
-            ssize_t sent = conn->enc_pkt_len;//不发
-            //ssize_t sent = xqc_send(conn, path, conn->enc_pkt, conn->enc_pkt_len);//发
+            //ssize_t sent = conn->enc_pkt_len;//不发
+            ssize_t sent = xqc_send(conn, path, conn->enc_pkt, conn->enc_pkt_len);//发
         }else{
             ssize_t sent = xqc_send(conn, path, conn->enc_pkt, conn->enc_pkt_len);
         }
@@ -2842,6 +2842,7 @@ xqc_conn_continue_send_by_conn(xqc_connection_t *conn)
     } else {
         xqc_conn_transmit_pto_probe_packets(conn);
         xqc_conn_retransmit_lost_packets(conn);
+        xqc_conn_transmit_fec_packets(conn);
         xqc_conn_send_packets(conn);
     }
 
@@ -5894,29 +5895,6 @@ xqc_check_fec_pkt(xqc_path_ctx_t *path,xqc_packet_out_t *packet_out, unsigned ch
     else{
         return XQC_FALSE;
     }
-
-    /*旧版*/
-    /*if(path->xqc_fec_pkt_list.pop == path->xqc_fec_pkt_list.head){//转到头才会,2024.8.14更新：改为使用计数器counter，便于添加比例的动态调整
-        printf("sender : 3 pkts be saved\n");
-        xqc_fec_pkt_node_t *pos = path->xqc_fec_pkt_list.pop;
-        for(size_t i=0;i<tmp_size;i++){//2024.5.16修改
-            printf("pkt_num=%li,pkt_len=%li\n",pos->pkt_num,pos->pkt_len);
-            //printf("%02X %02X %02X %02X %02X\n", pos->data[0], pos->data[1], pos->data[123], pos->data[200], pos->data[1000]);
-            pos = pos->next;
-        }
-        printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list.pop->pkt_num,path->xqc_fec_pkt_list.pop->pkt_len);
-        printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list.pop->next->pkt_num,path->xqc_fec_pkt_list.pop->next->pkt_len);
-        printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list.pop->next->next->pkt_num,path->xqc_fec_pkt_list.pop->next->next->pkt_len);
-        return XQC_TRUE;
-    }
-    else{
-        return XQC_FALSE;
-    }*/
-
-    //return XQC_OK;
-    //todo:当FEC指数变小时，如何清空队列
-
-    //return 0;
 }
 
 int
@@ -5958,11 +5936,6 @@ xqc_record_pkt_for_fec(xqc_path_ctx_t *path,xqc_packet_in_t *packet_in)//xqc_con
     }
     else{}//todo:减小长度
 
-    /*记录发送的包的信息，包号和内容*/
-    /*printf("packet_in->buf_size=%ld\n",packet_in->buf_size);
-    printf("packet_in->decode_payload_len=%ld\n",packet_in->decode_payload_len);
-    printf("packet_in->decode_payload_size=%ld\n",packet_in->decode_payload_size);*/
-
     //debug testing
     if(packet_in->buf_size>1216){
         memcpy(path->xqc_fec_pkt_list_in.pop->data,packet_in->buf,1216);
@@ -5979,16 +5952,6 @@ xqc_record_pkt_for_fec(xqc_path_ctx_t *path,xqc_packet_in_t *packet_in)//xqc_con
     //path->xqc_fec_pkt_list_in.pop = path->xqc_fec_pkt_list_in.pop->next;在记录完包号以后移动和检查队列是否满
     
     return XQC_FALSE;
-    /*if(path->xqc_fec_pkt_list_in.pop == path->xqc_fec_pkt_list_in.head){
-        printf("recver : 3 pkts be saved\n");
-        printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list_in.pop->pkt_num,path->xqc_fec_pkt_list_in.pop->pkt_len);
-        printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list_in.pop->next->pkt_num,path->xqc_fec_pkt_list_in.pop->next->pkt_len);
-        printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list_in.pop->next->next->pkt_num,path->xqc_fec_pkt_list_in.pop->next->next->pkt_len);
-        return XQC_TRUE;
-    }
-    else{
-        return XQC_FALSE;
-    }*/
 }
 
 int
@@ -6008,12 +5971,6 @@ xqc_check_frame_type_for_fec(xqc_path_ctx_t *path,xqc_packet_in_t *packet_in)
         //移动链表指针
         path->xqc_fec_pkt_list_in.pop = path->xqc_fec_pkt_list_in.pop->next;
     
-        /*if(path->xqc_fec_pkt_list_in.pop == path->xqc_fec_pkt_list_in.head){
-            printf("recver : 20 pkts be saved\n");
-            printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list_in.pop->pkt_num,path->xqc_fec_pkt_list_in.pop->pkt_len);
-            printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list_in.pop->next->pkt_num,path->xqc_fec_pkt_list_in.pop->next->pkt_len);
-            printf("pkt_num=%li,pkt_len=%li\n",path->xqc_fec_pkt_list_in.pop->next->next->pkt_num,path->xqc_fec_pkt_list_in.pop->next->next->pkt_len);
-        }*/
     }
     return XQC_OK;
 }

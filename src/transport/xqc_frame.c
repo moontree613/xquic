@@ -1452,10 +1452,10 @@ xqc_process_fec_frame(xqc_connection_t *conn, xqc_packet_in_t *packet_in)
         for(size_t i=0;i<fec_size;i++){
             if(pkt_num[i]==pos->pkt_num){
                 printf("pkt %lu is in recvd chain\n",pos->pkt_num);
-                if(i == 2){
+                /*if(i == 2){
                     printf("pkt %lu origin:%02X %02X %02X %02X %02X\n", pos->pkt_num,pos->data[0], pos->data[1], pos->data[123], pos->data[200], pos->data[1000]);
                     printf("origin bit = %u\n",pos->data[0]);
-                }
+                }*/
                 //printf("%02X %02X %02X %02X %02X\n", pos->data[0], pos->data[1], pos->data[123], pos->data[200], pos->data[1000]);
                 flag[i]=1;
                 p[i]=pos->data;

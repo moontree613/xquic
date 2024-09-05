@@ -24,9 +24,10 @@ xqc_fec_update_fec_ratio(xqc_path_ctx_t *path){
         if(path->fec_ob_wnd[i] == XQC_FEC_PKT_STATUS_REPAIR){
             repair_cnt++;
         }
-    }
+    }//检查fec ob window中丢包、repaired的情况
     if ((lost_cnt + repair_cnt)==0){
         //此时不丢包
+        //path->FEC_N = 0;
         /*todo：关闭fec*/
     }
     else{
@@ -34,7 +35,7 @@ xqc_fec_update_fec_ratio(xqc_path_ctx_t *path){
         printf("lost_cnt = %lu\n",lost_cnt);
         printf("repair_cnt = %lu\n",repair_cnt);
         printf("path->FEC_N = %lu\n",FEC_OB_WND_SIZE/(lost_cnt + repair_cnt));
-        //path->FEC_N = tmp;//repair_cnt + lost_cnt, C语言中/默认下取整，会以更保守的方式保护数据,FEC_OB_WND_SIZE/(lost_and_repair_cnt)
+        path->FEC_N = tmp;//repair_cnt + lost_cnt, C语言中/默认下取整，会以更保守的方式保护数据,FEC_OB_WND_SIZE/(lost_and_repair_cnt)
     }
     return;
 };
@@ -98,6 +99,7 @@ xqc_fec_ob_wnd_update_on_packet_lost(xqc_connection_t *conn, xqc_packet_out_t *l
         path->fec_ob_wnd[lost_packet->po_pkt.pkt_num % FEC_OB_WND_SIZE] = XQC_FEC_PKT_STATUS_LOST;
     }
     /*更新观察窗后要更新比例*/
+    printf("update fec ratio due to packet_lost\n");
     xqc_fec_update_fec_ratio(path);
     return;
 };
@@ -130,6 +132,7 @@ xqc_fec_ob_wnd_update_on_packet_repaired(xqc_connection_t *conn, uint64_t repair
         path->fec_ob_wnd[repair_pkt_num % FEC_OB_WND_SIZE] = XQC_FEC_PKT_STATUS_REPAIR;
     }
     /*更新观察窗后要更新比例*/
+    printf("update fec ratio due to packet_repaired\n");
     xqc_fec_update_fec_ratio(path);
     return;
 };

@@ -201,6 +201,7 @@ struct xqc_path_ctx_s {
     xqc_fec_pkt_list_t                xqc_fec_pkt_list;
     xqc_fec_pkt_list_t                xqc_fec_pkt_list_in;
     size_t                            fec_send_pkt_cnt;//用于计算当前累计发送的包个数，大于FEC_N就添加一个保护包
+    xqc_bool_t                        enable_fec;
     //unsigned char                   *snd_pkt[10];
 };
 #define FEC_OB_WND_SIZE 10

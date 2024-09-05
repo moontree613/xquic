@@ -231,7 +231,7 @@ xqc_path_init(xqc_path_ctx_t *path, xqc_connection_t *conn)
 {
     xqc_int_t ret = XQC_ERROR;
 
-    path->FEC_N = 4;
+    path->FEC_N = 10;
     path->xqc_fec_pkt_list.N = 0;//初始化FEC链表长度
     path->xqc_fec_pkt_list_in.N = 0;//初始化FEC链表长度
     path->fec_send_pkt_cnt = 0;//初始化保护计数器

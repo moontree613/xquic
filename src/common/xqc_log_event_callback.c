@@ -410,7 +410,7 @@ void
 xqc_log_REC_PARAMETERS_SET_callback(xqc_log_t *log, const char *func, xqc_send_ctl_t *send_ctl)
 {
     xqc_log_implement(log, REC_PARAMETERS_SET, func,
-                      "|reordering_packet_threshold:%d|reordering_time_threshold_shift:%d|",
+                      "|reordering_packet_threshold:%d|ing_time_threshold_shift:%d|",
                       send_ctl->ctl_reordering_packet_threshold, send_ctl->ctl_reordering_time_threshold_shift);
 }
 
